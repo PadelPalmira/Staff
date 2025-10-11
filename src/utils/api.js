@@ -1,5 +1,5 @@
 // URL de tu Apps Script desplegado (cambia esto por tu url)
-const API_URL = "TU_URL_DEPLOYED";
+const API_URL = "https://script.google.com/macros/s/AKfycby2OL77at1mFPXjeNXfiSQE_wSGyxM63geudLz_ERiNScQQPPCyeALYdfURKlpzrIGdwQ/exec";
 
 export async function getJugadores() {
   const res = await fetch(`${API_URL}?action=getData`);
