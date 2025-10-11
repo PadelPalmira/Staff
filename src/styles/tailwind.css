@@ -1,0 +1,9 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Extra styles for Miami Vice theme */
+body {
+  background: #181e26;
+  color: #fff;
+}
