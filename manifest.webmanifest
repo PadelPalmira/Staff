@@ -1,6 +1,6 @@
 {
-  "name": "PP Empleados",
-  "short_name": "PP Empleados",
+  "name": "PP Staff",
+  "short_name": "PP Staff",
   "description": "Seguimiento de tareas y turnos del equipo de Padel Palmira",
   "lang": "es-MX",
   "start_url": "./",

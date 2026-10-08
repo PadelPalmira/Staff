@@ -3,57 +3,23 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>PP Empleados</title>
+  <title>PP Staff</title>
   <meta name="theme-color" content="#0b0b0d">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
-  <meta name="apple-mobile-web-app-title" content="PP Empleados">
+  <meta name="apple-mobile-web-app-title" content="PP Staff">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="robots" content="noindex, nofollow">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="apple-touch-icon" href="assets/img/icon-180.png">
   <link rel="icon" type="image/png" sizes="32x32" href="assets/img/favicon-32.png">
   <link rel="stylesheet" href="assets/css/styles.css">
 </head>
 <body>
-  <main class="shell">
-    <header class="top">
-      <div class="logo-chip" aria-hidden="true">PP</div>
-      <div>
-        <h1>PP Empleados</h1>
-        <p class="sub">Prueba de instalación · versión <span id="ver"></span></p>
-      </div>
-    </header>
-
-    <p class="intro">
-      Esta pantalla solo comprueba que el teléfono puede usar la app. Si las cuatro tarjetas
-      salen en verde, ya podemos pasar a las tareas y turnos.
-    </p>
-
-    <section class="card" id="c-conn" data-state="wait">
-      <div class="card-head"><h2>1 · Conexión con el servidor</h2><span class="pill" id="p-conn">Probando…</span></div>
-      <p class="detail" id="d-conn">Comprobando la conexión…</p>
-      <button class="btn ghost" id="b-conn" type="button">Volver a probar</button>
-    </section>
-
-    <section class="card" id="c-install" data-state="wait">
-      <div class="card-head"><h2>2 · App instalada</h2><span class="pill" id="p-install">…</span></div>
-      <p class="detail" id="d-install"></p>
-    </section>
-
-    <section class="card" id="c-notif" data-state="wait">
-      <div class="card-head"><h2>3 · Notificaciones</h2><span class="pill" id="p-notif">…</span></div>
-      <p class="detail" id="d-notif"></p>
-      <button class="btn" id="b-notif" type="button">Probar notificación</button>
-    </section>
-
-    <section class="card" id="c-offline" data-state="wait">
-      <div class="card-head"><h2>4 · Sin internet</h2><span class="pill" id="p-offline">…</span></div>
-      <p class="detail" id="d-offline"></p>
-    </section>
-
-    <footer class="foot">Padel Palmira · uso interno</footer>
-  </main>
-
+  <div id="app" class="app" aria-live="polite"></div>
+  <div id="ventanas"></div>
+  <div id="avisos" class="avisos"></div>
+  <noscript><p style="padding:24px;color:#fff">PP Staff necesita JavaScript para funcionar.</p></noscript>
   <script type="module" src="assets/js/app.js"></script>
 </body>
 </html>

@@ -1,14 +1,22 @@
-// Service worker de PP Empleados: guarda la app en el teléfono para abrirla sin internet
+// Service worker de PP Staff: guarda la app en el teléfono para abrirla sin internet
 // y recibe notificaciones. No toca las llamadas a Supabase ni a otros servidores.
-const VERSION = '0.1.0';
-const CACHE = `ppe-shell-${VERSION}`;
+const VERSION = '0.2.0';
+const CACHE = `ppstaff-shell-${VERSION}`;
 const SHELL = [
   './',
   './index.html',
   './manifest.webmanifest',
   './assets/css/styles.css',
   './assets/js/config.js',
+  './assets/js/api.js',
+  './assets/js/ui.js',
   './assets/js/app.js',
+  './assets/js/vistas/login.js',
+  './assets/js/vistas/club.js',
+  './assets/js/vistas/panel.js',
+  './assets/js/vistas/usuarios.js',
+  './assets/js/vistas/registro.js',
+  './assets/js/vistas/diagnostico.js',
   './assets/img/icon-180.png',
   './assets/img/icon-192.png',
   './assets/img/icon-512.png',
@@ -18,7 +26,8 @@ const SHELL = [
 self.addEventListener('install', (event) => {
   event.waitUntil((async () => {
     const cache = await caches.open(CACHE);
-    await Promise.all(SHELL.map((url) => cache.add(url).catch(() => null)));
+    // "reload": siempre la versión más nueva del servidor, no la copia vieja del navegador
+    await Promise.all(SHELL.map((url) => cache.add(new Request(url, { cache: 'reload' })).catch(() => null)));
     await self.skipWaiting();
   })());
 });
@@ -26,7 +35,7 @@ self.addEventListener('install', (event) => {
 self.addEventListener('activate', (event) => {
   event.waitUntil((async () => {
     const keys = await caches.keys();
-    await Promise.all(keys.filter((k) => k.startsWith('ppe-shell-') && k !== CACHE).map((k) => caches.delete(k)));
+    await Promise.all(keys.filter((k) => (k.startsWith('ppstaff-shell-') || k.startsWith('ppe-shell-')) && k !== CACHE).map((k) => caches.delete(k)));
     await self.clients.claim();
   })());
 });
@@ -68,7 +77,7 @@ self.addEventListener('fetch', (event) => {
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) { data = { body: event.data && event.data.text() }; }
-  event.waitUntil(self.registration.showNotification(data.title || 'PP Empleados', {
+  event.waitUntil(self.registration.showNotification(data.title || 'PP Staff', {
     body: data.body || '',
     icon: 'assets/img/icon-192.png',
     tag: data.tag || undefined,

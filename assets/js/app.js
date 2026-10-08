@@ -1,133 +1,89 @@
-import { SUPABASE_URL, SUPABASE_KEY, APP_VERSION, APP_BUILD } from './config.js';
+// PP Staff · arranque y rutas.
+//   #/registro/<token>  -> registro de una persona invitada (sin cuenta)
+//   #/diagnostico       -> prueba del teléfono
+//   (cualquier otra)    -> según la cuenta: celular del club (PIN) o panel de admin/gerencia
+import * as api from './api.js';
+import { esc, avisoConAccion } from './ui.js';
+import { montarLogin } from './vistas/login.js';
+import { montarClub, montarComoUsuario } from './vistas/club.js';
+import { montarPanel } from './vistas/panel.js';
+import { montarRegistro } from './vistas/registro.js';
+import { montarDiagnostico } from './vistas/diagnostico.js';
 
-const $ = (id) => document.getElementById(id);
+const raiz = document.getElementById('app');
+const limpiezas = [];
+let carrera = 0;
 
-function setCard(name, state, pill, detail) {
-  $('c-' + name).dataset.state = state;
-  $('p-' + name).textContent = pill;
-  if (detail !== undefined) $('d-' + name).textContent = detail;
+const ctx = {
+  alDesmontar: (fn) => limpiezas.push(fn),
+  recargar: () => iniciar(),
+  entrarComo(token, perfil) { limpiar(); montarComoUsuario(raiz, ctx, { token, perfil }); },
+  volverAdmin: () => iniciar(),
+};
+function limpiar() { limpiezas.splice(0).forEach((f) => { try { f(); } catch { /* sigue */ } }); }
+
+// Al cerrar la cuenta se borra lo guardado en el teléfono
+api.onSesion((hay) => {
+  if (!hay) ['ppstaff-perfil', 'ppstaff-pin', 'ppstaff-personal', 'ppstaff-tab'].forEach((k) => api.guardarLocal(k, null));
+});
+
+function pantallaMensaje({ titulo, texto, boton, alTocar, secundario }) {
+  raiz.innerHTML = `<main class="pantalla centrada"><div class="marca"><div class="logo-chip" aria-hidden="true">PP</div><h1>PP Staff</h1></div>
+    <div class="tarjeta vacio"><p><b>${esc(titulo)}</b></p><p>${esc(texto)}</p>
+    ${boton ? `<button class="btn" data-a>${esc(boton)}</button>` : ''}${secundario ? `<button class="btn ghost" data-b>${esc(secundario.texto)}</button>` : ''}</div></main>`;
+  raiz.querySelector('[data-a]')?.addEventListener('click', alTocar);
+  raiz.querySelector('[data-b]')?.addEventListener('click', secundario?.alTocar);
 }
 
-const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent) ||
-  (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
-const isStandalone = () =>
-  window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+async function iniciar() {
+  const yo = ++carrera;
+  limpiar();
+  const hash = location.hash || '';
+  const reg = hash.match(/^#\/registro\/([A-Za-z0-9_-]+)/);
+  if (reg) return montarRegistro(raiz, ctx, reg[1]);
+  if (hash.startsWith('#/diagnostico')) return montarDiagnostico(raiz, ctx);
+  if (!api.haySesion()) return montarLogin(raiz, ctx);
 
-/* 1 · Conexión con Supabase */
-async function testConnection() {
-  setCard('conn', 'wait', 'Probando…', 'Comprobando la conexión…');
-  const t0 = performance.now();
+  raiz.innerHTML = '<main class="pantalla centrada"><p class="cargando">Cargando…</p></main>';
+  let perfil;
   try {
-    const ctrl = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 12000);
-    const res = await fetch(`${SUPABASE_URL}/auth/v1/health`, {
-      headers: { apikey: SUPABASE_KEY },
-      signal: ctrl.signal,
-      cache: 'no-store',
-    });
-    clearTimeout(timer);
-    const ms = Math.round(performance.now() - t0);
-    if (res.ok) setCard('conn', 'ok', 'Conectado', `El servidor respondió en ${ms} ms.`);
-    else setCard('conn', 'bad', 'Error', `El servidor respondió con el código ${res.status}.`);
+    perfil = await api.rpc('mi_perfil');
+    api.guardarLocal('ppstaff-perfil', perfil);
   } catch (e) {
-    const sinRed = !navigator.onLine;
-    setCard('conn', 'bad', sinRed ? 'Sin internet' : 'Sin conexión',
-      sinRed ? 'El teléfono no tiene internet en este momento.'
-             : 'No se pudo llegar al servidor. Revisa el WiFi o los datos y vuelve a probar.');
-  }
-}
-
-/* 2 · App instalada */
-function checkInstall() {
-  if (isStandalone()) {
-    setCard('install', 'ok', 'Instalada', 'Estás usando la app desde la pantalla de inicio. Perfecto.');
-  } else if (isIOS) {
-    setCard('install', 'warn', 'Falta instalar',
-      'En el iPhone: abre esta página en Safari, toca el botón Compartir (el cuadro con la flecha), ' +
-      'elige "Agregar a pantalla de inicio" y ábrela desde ese ícono.');
-  } else {
-    setCard('install', 'warn', 'Falta instalar',
-      'Desde el menú del navegador elige "Instalar app" o "Agregar a pantalla de inicio".');
-  }
-}
-
-/* 3 · Notificaciones */
-function checkNotifications() {
-  const btn = $('b-notif');
-  const soportado = 'Notification' in window && 'serviceWorker' in navigator;
-  if (!soportado) {
-    btn.disabled = true;
-    if (isIOS && !isStandalone()) {
-      setCard('notif', 'warn', 'Falta instalar',
-        'En iPhone las notificaciones solo funcionan con la app instalada en la pantalla de inicio (paso 2).');
-    } else {
-      setCard('notif', 'bad', 'No disponible', 'Este navegador no permite notificaciones.');
+    if (yo !== carrera) return;
+    if (e.codigo === 'sin_sesion' || e.status === 401 || e.status === 403) {
+      await api.salir();
+      return montarLogin(raiz, ctx, { aviso: 'Tu sesión terminó. Entra de nuevo.' });
     }
-    return;
-  }
-  const p = Notification.permission;
-  if (p === 'granted') setCard('notif', 'ok', 'Permitidas', 'Toca el botón para enviarte una notificación de prueba.');
-  else if (p === 'denied') {
-    setCard('notif', 'bad', 'Bloqueadas',
-      'Las notificaciones están bloqueadas. Actívalas en Ajustes del teléfono > Notificaciones > PP Empleados.');
-    btn.disabled = true;
-  } else setCard('notif', 'warn', 'Falta permiso', 'Toca el botón y elige "Permitir" cuando el teléfono pregunte.');
-}
-
-async function probarNotificacion() {
-  try {
-    const permiso = await Notification.requestPermission();
-    if (permiso !== 'granted') { checkNotifications(); return; }
-    const reg = await navigator.serviceWorker.ready;
-    await reg.showNotification('PP Empleados', {
-      body: 'Prueba de notificación: si ves esto, funciona.',
-      icon: 'assets/img/icon-192.png',
-      tag: 'prueba',
-    });
-    setCard('notif', 'ok', 'Funciona', 'Deberías haber recibido la notificación. Si no llegó, revisa que el teléfono no esté en No molestar.');
-  } catch (e) {
-    setCard('notif', 'bad', 'Error', 'No se pudo enviar la notificación de prueba.');
-  }
-}
-
-/* 4 · Sin internet */
-async function checkOffline() {
-  const en_linea = navigator.onLine;
-  if (!('serviceWorker' in navigator)) {
-    setCard('offline', 'bad', 'No disponible', 'Este navegador no permite usar la app sin internet.');
-    return;
-  }
-  try {
-    const reg = await navigator.serviceWorker.ready;
-    const listo = !!reg.active && !!navigator.serviceWorker.controller;
-    if (listo) {
-      setCard('offline', 'ok', 'Lista',
-        (en_linea ? 'Tienes internet. ' : 'Estás sin internet y la app abrió bien. ') +
-        'La app ya quedó guardada en el teléfono para abrirse sin conexión.');
-    } else {
-      setCard('offline', 'warn', 'Preparando', 'La app se está guardando en el teléfono. Cierra y vuelve a abrirla en un momento.');
+    perfil = api.leerLocal('ppstaff-perfil');
+    if (!perfil) {
+      return pantallaMensaje({ titulo: 'No se pudo cargar', texto: e.message, boton: 'Volver a intentar', alTocar: iniciar,
+        secundario: { texto: 'Salir', alTocar: async () => { await api.salir(); iniciar(); } } });
     }
-  } catch (e) {
-    setCard('offline', 'bad', 'Error', 'No se pudo preparar el modo sin internet.');
   }
+  if (yo !== carrera) return;
+
+  const salir = async () => { await api.salir(); iniciar(); };
+  if (!perfil) {
+    return pantallaMensaje({ titulo: 'Tu cuenta no tiene acceso', texto: 'Esta cuenta no está registrada en PP Staff. Pide al administrador que te dé de alta.', boton: 'Salir', alTocar: salir });
+  }
+  if (perfil.estado !== 'activo') {
+    return pantallaMensaje({ titulo: 'Cuenta desactivada', texto: 'Tu usuario está desactivado. Habla con el administrador.', boton: 'Salir', alTocar: salir });
+  }
+  if (perfil.rol === 'dispositivo') return montarClub(raiz, ctx);
+  if (perfil.rol === 'admin' || perfil.rol === 'gerencia') return montarPanel(raiz, ctx, perfil);
+  return pantallaMensaje({ titulo: 'Usa el celular del club', texto: 'Las recepcionistas entran desde el celular del club, tocando su nombre y escribiendo su PIN.', boton: 'Salir', alTocar: salir });
 }
 
-async function registerSW() {
-  if (!('serviceWorker' in navigator)) return;
-  try { await navigator.serviceWorker.register('./sw.js'); } catch (e) { /* se reporta en la tarjeta 4 */ }
+window.addEventListener('hashchange', iniciar);
+
+if ('serviceWorker' in navigator) {
+  const yaHabia = !!navigator.serviceWorker.controller;
+  let avisado = false;
+  navigator.serviceWorker.register('./sw.js').catch(() => { /* la tarjeta de diagnóstico lo reporta */ });
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (yaHabia && !avisado) { avisado = true; avisoConAccion('Hay una versión nueva de la app.', 'Actualizar', () => location.reload()); }
+  });
 }
 
-async function init() {
-  $('ver').textContent = `${APP_VERSION} (${APP_BUILD})`;
-  $('b-conn').addEventListener('click', testConnection);
-  $('b-notif').addEventListener('click', probarNotificacion);
-  window.addEventListener('online', () => { checkOffline(); testConnection(); });
-  window.addEventListener('offline', () => { checkOffline(); testConnection(); });
-  checkInstall();
-  checkNotifications();
-  await registerSW();
-  checkOffline();
-  testConnection();
-}
-
-init();
+iniciar();
