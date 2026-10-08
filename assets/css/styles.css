@@ -250,3 +250,56 @@ button.fila:active{border-color:var(--cyan)}
 .fila.sol{flex-wrap:wrap;cursor:default;border-color:rgba(255,0,193,.35)}
 .fila.sol .fila-txt span{white-space:normal}
 .tiles .tarjeta.vacio{grid-column:1/-1}
+
+/* ---------- turnos y tareas (0.4) ---------- */
+.cap::first-letter{text-transform:uppercase}
+.ok-txt{color:var(--ok)} .warn-txt{color:var(--warn)} .mal-txt{color:var(--bad)}
+.panel.emp .barra-izq .sub{display:block}
+.saludo+.sub{margin:-8px 0 14px}
+.progreso{height:10px;border-radius:var(--r-pill);background:var(--surface-3);overflow:hidden;margin:12px 0 4px}
+.progreso span{display:block;height:100%;background:var(--grad);border-radius:inherit;transition:width .3s}
+.progreso.chico{height:6px;margin:8px 0 0}
+.turno-abierto{border-color:rgba(0,242,234,.4)}
+.turno-abierto .btn{margin-top:12px}
+.btn-turno{margin-top:10px;flex-direction:column;gap:2px}
+.btn-turno small{font:500 12.5px var(--font);opacity:.75}
+.fila.vivo{border-color:rgba(0,242,234,.3)}
+.fila-txt .progreso{width:100%}
+.lista-tareas{display:flex;flex-direction:column;gap:8px}
+.tarea{display:flex;gap:12px;align-items:flex-start;padding:12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-md)}
+.tarea.vencida{border-color:rgba(251,113,133,.5)}
+.tarea.lista{opacity:.78}
+.tarea.excusada{opacity:.6}
+.tarea.subiendo{opacity:.5;pointer-events:none}
+.tarea-check{flex:none;width:46px;height:46px;border-radius:50%;border:2px solid var(--border-strong);background:var(--surface-2);color:var(--ok);
+  font:700 22px var(--font);display:grid;place-items:center;cursor:pointer;padding:0}
+.tarea-check.ro{width:30px;height:30px;font-size:15px;cursor:default}
+.tarea.lista .tarea-check{background:var(--ok-dim);border-color:var(--ok)}
+.tarea-check:active{transform:scale(.94)}
+.tarea-txt{flex:1;min-width:0;display:flex;flex-direction:column;gap:3px}
+.tarea-txt b{font-size:15.5px}
+.tarea-meta{font-size:12.5px;color:var(--text-2)}
+.tarea-botones{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.tarea-botones:empty{display:none}
+.chip{background:var(--surface-2);color:var(--text);border:1px solid var(--border-strong);border-radius:var(--r-pill);padding:7px 13px;font:600 13px var(--font);cursor:pointer;min-height:34px}
+.chip:active{border-color:var(--cyan)}
+.cerrar-turno{margin-top:24px}
+img.evidencia{width:100%;max-width:240px;border-radius:var(--r-sm);margin-top:6px;cursor:zoom-in;display:block}
+img.evidencia.grande{max-width:100%;cursor:default}
+dl.resumen{margin-top:14px}
+.textarea,textarea{width:100%;border-radius:14px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text);font:500 16px var(--font);padding:12px 14px;outline:none;resize:vertical}
+textarea:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(0,242,234,.15)}
+input[type=number],input[type=time],input[type=date]{width:100%;min-height:50px;border-radius:14px;border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text);
+  font:500 16px var(--font);padding:0 14px;outline:none;color-scheme:dark}
+input[type=number]:focus,input[type=time]:focus,input[type=date]:focus{border-color:var(--cyan);box-shadow:0 0 0 3px rgba(0,242,234,.15)}
+.chips{display:flex;flex-wrap:wrap;gap:8px}
+.chip-sel{display:block;position:relative;cursor:pointer;margin:0 !important}
+.chip-sel input{position:absolute;opacity:0;pointer-events:none}
+.chip-sel span{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:46px;min-height:46px;padding:4px 10px;border-radius:14px;
+  border:1px solid var(--border-strong);background:var(--surface-2);color:var(--text-2);font:700 15px var(--font)}
+.chip-sel span small{font:500 10px var(--font);opacity:.8}
+.chip-sel.ancho span{padding:0 16px;font-size:14px}
+.chip-sel input:checked+span{background:rgba(0,242,234,.14);border-color:var(--cyan);color:var(--cyan)}
+.chip-sel input:focus-visible+span{box-shadow:0 0 0 3px rgba(0,242,234,.3)}
+.interruptor{display:flex;align-items:center;gap:12px;font-size:14.5px;cursor:pointer;text-align:left}
+.interruptor input{width:22px;height:22px;accent-color:var(--cyan);flex:none}

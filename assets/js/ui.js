@@ -126,6 +126,22 @@ export async function comprimirFoto(file, lado = 320) {
   g.drawImage(img, (w - s) / 2, (h - s) / 2, s, s, 0, 0, lado, lado);
   return c.toDataURL('image/jpeg', 0.82);
 }
+// Foto de evidencia de una tarea: lado largo máximo 900 px, JPEG liviano (~60-90 KB). Devuelve un Blob.
+export async function comprimirEvidencia(file, lado = 900) {
+  const img = await cargarImagen(file);
+  const w = img.width || img.naturalWidth, h = img.height || img.naturalHeight;
+  const k = Math.min(1, lado / Math.max(w, h));
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w * k)); c.height = Math.max(1, Math.round(h * k));
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
+  g.drawImage(img, 0, 0, c.width, c.height);
+  return await new Promise((ok, mal) => c.toBlob((b) => (b ? ok(b) : mal(new Error('foto'))), 'image/jpeg', 0.6));
+}
+export function duracionTexto(min) {
+  const m = Math.max(0, Math.round(min || 0));
+  return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`;
+}
 export async function dataUrlABlob(dataUrl) { return (await fetch(dataUrl)).blob(); }
 
 // Selector de foto: devuelve { valor() -> data URL JPEG o null, cambio() -> true si el usuario eligió una }
@@ -191,10 +207,10 @@ export function soloNumeros(raiz, selector = '.pin-input') {
     if (e.target.matches(selector)) e.target.value = e.target.value.replace(/\D/g, '').slice(0, 4);
   });
 }
-export const pinValido = (p) => /^[0-9]{4}$/.test(p) && !/^(\d)\1{3}$/.test(p) && !['1234', '4321', '0123', '3210'].includes(p);
+export const pinValido = (p) => /^[0-9]{4}$/.test(p);
 export const celularValido = (c) => { const d = String(c || '').replace(/\D/g, ''); return d.length === 10 || (d.length === 12 && d.startsWith('52')) || (d.length === 13 && d.startsWith('521')); };
 export const formatoCelular = (c) => { const d = String(c || '').replace(/\D/g, '').slice(-10); return d.length === 10 ? `${d.slice(0, 3)} ${d.slice(3, 6)} ${d.slice(6)}` : (c || ''); };
-export const MENSAJE_PIN = 'El PIN debe ser de 4 números y no puede ser muy obvio (como 1234 o 0000).';
+export const MENSAJE_PIN = 'El PIN debe ser de 4 números.';
 
 export function mostrarError(raiz, texto) {
   let el = $('.error-form', raiz);

@@ -110,31 +110,31 @@ export async function funcion(accion, datos = {}, { conSesion = true } = {}) {
 
 // ---------- fotos ----------
 const cacheFotos = new Map(); // "ruta|version" -> { url, vence }
-export async function urlsFotos(items) {
+export async function urlsFotos(items, bucket = 'avatares') {
   const salida = new Map();
   const faltan = [];
   for (const it of items) {
     if (!it.path) continue;
     const k = `${it.path}|${it.v || ''}`;
-    const c = cacheFotos.get(k);
+    const c = cacheFotos.get(bucket + '/' + k);
     if (c && c.vence > Date.now()) salida.set(k, c.url); else faltan.push({ k, path: it.path });
   }
   if (faltan.length) {
     try {
       const t = await tokenVigente();
       const unicos = [...new Set(faltan.map((f) => f.path))];
-      const r = await pedir('/storage/v1/object/sign/avatares', { metodo: 'POST', cuerpo: { expiresIn: 3600, paths: unicos }, token: t });
+      const r = await pedir(`/storage/v1/object/sign/${bucket}`, { metodo: 'POST', cuerpo: { expiresIn: 3600, paths: unicos }, token: t });
       const porRuta = new Map((r || []).filter((x) => x.signedURL && !x.error).map((x) => [x.path, `${SUPABASE_URL}/storage/v1${x.signedURL}`]));
       for (const f of faltan) {
         const url = porRuta.get(f.path);
-        if (url) { cacheFotos.set(f.k, { url, vence: Date.now() + 50 * 60000 }); salida.set(f.k, url); }
+        if (url) { cacheFotos.set(bucket + '/' + f.k, { url, vence: Date.now() + 50 * 60000 }); salida.set(f.k, url); }
       }
     } catch { /* sin fotos: se muestran las iniciales */ }
   }
   return salida;
 }
-export async function subirFoto(ruta, blob) {
+export async function subirFoto(ruta, blob, bucket = 'avatares') {
   const t = await tokenVigente();
-  await pedir(`/storage/v1/object/avatares/${ruta}`, { metodo: 'POST', cuerpo: blob, token: t, headers: { 'x-upsert': 'true', 'Content-Type': 'image/jpeg' } });
-  for (const k of [...cacheFotos.keys()]) if (k.startsWith(ruta + '|')) cacheFotos.delete(k);
+  await pedir(`/storage/v1/object/${bucket}/${ruta}`, { metodo: 'POST', cuerpo: blob, token: t, headers: { 'x-upsert': 'true', 'Content-Type': 'image/jpeg' } });
+  for (const k of [...cacheFotos.keys()]) if (k.startsWith(bucket + '/' + ruta + '|')) cacheFotos.delete(k);
 }

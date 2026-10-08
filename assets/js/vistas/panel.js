@@ -3,12 +3,16 @@ import * as api from '../api.js';
 import { APP_VERSION } from '../config.js';
 import { esc, $, $$, ROL, avatar, hidratarAvatares, aviso, conOcupado, primerNombre } from '../ui.js';
 import { montarUsuarios } from './usuarios.js';
+import { montarTurnos, pintarEnVivo, verTurno } from './turnos.js';
+import { montarTareasAdmin } from './tareas_admin.js';
+import { montarAjustes } from './ajustes.js';
 
 const LLAVE_TAB = 'ppstaff-tab';
 
 export function montarPanel(raiz, ctx, yo) {
   const esAdmin = yo.rol === 'admin';
-  const tabs = esAdmin ? [['inicio', 'Inicio', '⌂'], ['usuarios', 'Usuarios', '☺']] : [['inicio', 'Inicio', '⌂']];
+  const tabs = [['inicio', 'Inicio', '⌂'], ['turnos', 'Turnos', '◷'], ['tareas', 'Tareas', '✓'],
+    ...(esAdmin ? [['usuarios', 'Usuarios', '☺'], ['ajustes', 'Ajustes', '⚙']] : [])];
   let actual = api.leerLocal(LLAVE_TAB);
   if (!tabs.some((t) => t[0] === actual)) actual = 'inicio';
 
@@ -65,6 +69,9 @@ export function montarPanel(raiz, ctx, yo) {
     const nuevo = cont.cloneNode(false); // quita los escuchas de la sección anterior
     cont.replaceWith(nuevo);
     if (id === 'usuarios') montarUsuarios(nuevo, ctx, yo);
+    else if (id === 'turnos') montarTurnos(nuevo, ctx, yo);
+    else if (id === 'tareas') montarTareasAdmin(nuevo, ctx, yo);
+    else if (id === 'ajustes') montarAjustes(nuevo, ctx, yo);
     else montarInicio(nuevo);
     window.scrollTo(0, 0);
   }
@@ -72,24 +79,16 @@ export function montarPanel(raiz, ctx, yo) {
   async function montarInicio(el) {
     el.innerHTML = `<h2 class="saludo">Hola, ${esc(primerNombre(yo.nombre_completo))}</h2>
       ${esAdmin ? '<section class="tarjeta tarjeta-solicitud" id="tarjeta-solicitudes" hidden></section>' : ''}
+      <section class="tarjeta"><h2>Turnos de hoy</h2><div id="en-vivo" class="lista"></div></section>
       <section class="tarjeta"><h2>Resumen</h2><div id="resumen"><p class="cargando">Cargando…</p></div></section>
-      <section class="tarjeta"><h2>Tareas y turnos</h2>
-        <p class="detalle">Aquí vas a ver en vivo quién abrió turno, qué tareas faltan y las alertas. Esa parte llega en las siguientes versiones.</p></section>
-      ${esAdmin ? `<section class="tarjeta"><h2>Correos</h2>
-        <p class="detalle">Las invitaciones se mandan por correo desde Gmail. Manda una prueba a tu correo para confirmar que el envío funciona.</p>
-        <button type="button" class="btn ghost" data-probar-correo>Enviar correo de prueba</button></section>` : ''}
       <p class="pie"><a href="#/diagnostico">Diagnóstico</a> · versión ${esc(APP_VERSION)}</p>`;
-    $('[data-probar-correo]', el)?.addEventListener('click', (e) => conOcupado(e.currentTarget, async () => {
-      try {
-        const r = await api.funcion('probar_correo');
-        if (!r.ok) return aviso(r.mensaje || 'No se pudo enviar la prueba.', 'error');
-        if (r.correo.enviado) aviso(`Correo de prueba enviado a ${r.correo.destino}. Revisa tu bandeja.`, 'ok', 6000);
-        else if (r.correo.error === 'sin_configurar') aviso('Falta configurar la cuenta de Gmail en el servidor (contraseña de aplicación).', 'error', 7000);
-        else aviso(`Gmail no aceptó el envío: ${r.correo.error}`, 'error', 8000);
-      } catch (err) { aviso(err.message, 'error'); }
-    }));
+    const vivo = $('#en-vivo', el);
+    pintarEnVivo(vivo);
+    vivo.addEventListener('click', (e) => { const b = e.target.closest('[data-turno]'); if (b) verTurno(b.dataset.turno, yo, () => pintarEnVivo(vivo)); });
+    const reloj = setInterval(() => { if (document.visibilityState === 'visible' && el.isConnected) pintarEnVivo(vivo); }, 30000);
+    ctx.alDesmontar(() => clearInterval(reloj));
     if (esAdmin) { pendientes = -1; revisarSolicitudes(); }
-    if (!esAdmin) { $('#resumen', el).innerHTML = '<p class="detalle">Bienvenida. Tu usuario de gerencia está activo.</p>'; return; }
+    if (!esAdmin) { $('#resumen', el).closest('section').remove(); return; }
     try {
       const [perfiles, inv] = await Promise.all([
         api.seleccionar('perfiles', 'select=rol,estado,tiene_pin'),

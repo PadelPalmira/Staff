@@ -2,6 +2,7 @@
 // También sirve para "Entrar como" del administrador (sin PIN, con aviso arriba).
 import * as api from '../api.js';
 import { APP_VERSION } from '../config.js';
+import { montarEmpleado } from './empleado.js';
 import { esc, $, $$, avatar, hidratarAvatares, aviso, primerNombre, horaCorta, ventana, conOcupado, selectorFoto,
          campoPin, activarMostrar, soloNumeros, pinValido, celularValido, MENSAJE_PIN, mostrarError, quitarError } from '../ui.js';
 
@@ -157,21 +158,13 @@ async function crearClub(raiz, ctx, { porAdmin, inicial }) {
   // ---------- inicio de la persona ----------
   function pantallaInicio() {
     ultimaActividad = Date.now();
-    const hoy = new Date().toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', timeZone: 'America/Mexico_City' });
-    raiz.innerHTML = `<main class="pantalla">
-      ${porAdmin ? `<div class="banda-admin"><span>Estás viendo la app como <b>${esc(perfil.nombre_completo)}</b> (entraste como administrador, sin PIN)</span>
-        <button type="button" class="btn chico" data-volver-admin>Volver a administración</button></div>` : ''}
-      <header class="cab-inicio">${avatar(perfil, 'lg')}
-        <div><h1>Hola, ${esc(primerNombre(perfil.nombre_completo))}</h1><p class="sub">${esc(hoy)}</p></div></header>
-      <section class="tarjeta"><h2>Tu turno</h2>
-        <p class="detalle">Aquí vas a abrir tu turno, marcar tus tareas y ver los pendientes. Esa parte llega en la siguiente versión.</p></section>
-      <section class="tarjeta"><h2>Tu usuario</h2>
-        <p class="detalle">Si terminaste, sal de tu usuario para que la siguiente persona pueda entrar. La app también se cierra sola después de ${minutos} minutos sin usarla.</p></section>
-      <button type="button" class="btn grande salir-usuario" data-salir>Salir de mi usuario</button>
-      <p class="pie"><a href="#/diagnostico">Diagnóstico</a> · versión ${esc(APP_VERSION)}</p></main>`;
-    hidratarAvatares(raiz);
-    $('[data-salir]', raiz).addEventListener('click', () => cerrarUsuario('manual'));
-    $('[data-volver-admin]', raiz)?.addEventListener('click', () => cerrarUsuario('admin'));
+    const emp = montarEmpleado(raiz, {
+      token, perfil, porAdmin,
+      alSalir: () => cerrarUsuario('manual'),
+      alVolverAdmin: () => cerrarUsuario('admin'),
+      alSesionInvalida: () => cerrarUsuario('expirada'),
+    });
+    limpiezas.push(emp.destruir);
     vigilarInactividad();
   }
 
