@@ -1,6 +1,6 @@
 // Service worker de PP Staff: guarda la app en el teléfono para abrirla sin internet
 // y recibe notificaciones. No toca las llamadas a Supabase ni a otros servidores.
-const VERSION = '0.2.0';
+const VERSION = '0.3.0';
 const CACHE = `ppstaff-shell-${VERSION}`;
 const SHELL = [
   './',

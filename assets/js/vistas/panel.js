@@ -20,7 +20,7 @@ export function montarPanel(raiz, ctx, yo) {
     </header>
     <main class="contenido" id="contenido"></main>
     <nav class="tabs" aria-label="Secciones">${tabs.map(([id, txt, ico]) =>
-      `<button type="button" data-tab="${id}" aria-current="${id === actual}"><span aria-hidden="true">${ico}</span>${txt}</button>`).join('')}</nav>
+      `<button type="button" data-tab="${id}" aria-current="${id === actual}"><span aria-hidden="true">${ico}</span>${txt}${id === 'usuarios' ? '<i class="punto-aviso" data-badge hidden></i>' : ''}</button>`).join('')}</nav>
   </div>`;
   hidratarAvatares(raiz);
   $('[data-salir]', raiz).addEventListener('click', async () => { await api.salir(); api.guardarLocal(LLAVE_TAB, null); ctx.recargar(); });
@@ -28,6 +28,34 @@ export function montarPanel(raiz, ctx, yo) {
     const b = e.target.closest('[data-tab]');
     if (b) ir(b.dataset.tab);
   });
+
+  // Aviso de solicitudes pendientes: punto en la pestaña Usuarios y tarjeta en Inicio (se revisa cada 30 s)
+  let pendientes = 0;
+  async function revisarSolicitudes() {
+    if (!esAdmin || document.visibilityState !== 'visible') return;
+    try {
+      const l = await api.seleccionar('solicitudes_usuario', 'select=id&estado=eq.pendiente');
+      if (l.length === pendientes) return;
+      pendientes = l.length;
+      const b = $('[data-badge]', raiz);
+      if (b) { b.hidden = !pendientes; b.textContent = pendientes ? String(pendientes) : ''; }
+      const t = $('#tarjeta-solicitudes', raiz);
+      if (t) pintarSolicitudes(t);
+    } catch { /* sin internet: se vuelve a intentar */ }
+  }
+  function pintarSolicitudes(t) {
+    t.hidden = !pendientes;
+    t.innerHTML = pendientes ? `<h2>Solicitudes de usuario</h2><p class="detalle">${pendientes === 1 ? 'Alguien pidió' : `${pendientes} personas pidieron`} un usuario desde el celular del club.</p>
+      <button type="button" class="btn" data-ver-solicitudes>Revisar solicitudes (${pendientes})</button>` : '';
+    $('[data-ver-solicitudes]', t)?.addEventListener('click', () => ir('usuarios'));
+  }
+  if (esAdmin) {
+    const reloj = setInterval(revisarSolicitudes, 30000);
+    const forzar = () => { pendientes = -1; revisarSolicitudes(); };
+    document.addEventListener('visibilitychange', revisarSolicitudes);
+    document.addEventListener('ppstaff-solicitudes', forzar);
+    ctx.alDesmontar(() => { clearInterval(reloj); document.removeEventListener('visibilitychange', revisarSolicitudes); document.removeEventListener('ppstaff-solicitudes', forzar); });
+  }
 
   function ir(id) {
     actual = id;
@@ -43,6 +71,7 @@ export function montarPanel(raiz, ctx, yo) {
 
   async function montarInicio(el) {
     el.innerHTML = `<h2 class="saludo">Hola, ${esc(primerNombre(yo.nombre_completo))}</h2>
+      ${esAdmin ? '<section class="tarjeta tarjeta-solicitud" id="tarjeta-solicitudes" hidden></section>' : ''}
       <section class="tarjeta"><h2>Resumen</h2><div id="resumen"><p class="cargando">Cargando…</p></div></section>
       <section class="tarjeta"><h2>Tareas y turnos</h2>
         <p class="detalle">Aquí vas a ver en vivo quién abrió turno, qué tareas faltan y las alertas. Esa parte llega en las siguientes versiones.</p></section>
@@ -59,6 +88,7 @@ export function montarPanel(raiz, ctx, yo) {
         else aviso(`Gmail no aceptó el envío: ${r.correo.error}`, 'error', 8000);
       } catch (err) { aviso(err.message, 'error'); }
     }));
+    if (esAdmin) { pendientes = -1; revisarSolicitudes(); }
     if (!esAdmin) { $('#resumen', el).innerHTML = '<p class="detalle">Bienvenida. Tu usuario de gerencia está activo.</p>'; return; }
     try {
       const [perfiles, inv] = await Promise.all([
@@ -76,4 +106,5 @@ export function montarPanel(raiz, ctx, yo) {
   }
 
   ir(actual);
+  if (esAdmin) { pendientes = -1; revisarSolicitudes(); }
 }

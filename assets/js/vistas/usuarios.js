@@ -9,12 +9,13 @@ const ERR = {
   nombre_invalido: 'Escribe el nombre completo.', celular_invalido: 'El celular debe tener 10 dígitos.',
   pin_invalido: MENSAJE_PIN, estado_invalido: 'Estado no válido.', rol_no_cambiable: 'Este usuario no puede cambiar de rol. Crea una invitación nueva con el rol que necesitas.',
   ultimo_admin: 'Debe quedar al menos un administrador activo.', usuario_no_disponible: 'Este usuario no está disponible.',
-  ruta_invalida: 'No se pudo guardar la foto.',
+  ruta_invalida: 'No se pudo guardar la foto.', solicitud_resuelta: 'Esta solicitud ya fue atendida.',
+  email_ya_registrado: 'Ya existe un usuario con ese correo.',
 };
 const msg = (r) => r?.mensaje || ERR[r?.error] || 'No se pudo completar la acción.';
 
 const GRUPOS = [['admin', 'Administradores'], ['gerencia', 'Gerencia'], ['recepcion', 'Recepción'], ['dispositivo', 'Celular del club']];
-const ORIGEN = { invitacion: 'por invitación', directo: 'creado por el administrador', inicial: 'administrador inicial' };
+const ORIGEN = { invitacion: 'por invitación', directo: 'creado por el administrador', inicial: 'administrador inicial', solicitud: 'solicitado desde el celular del club' };
 
 function textoBitacora(b) {
   const d = b.detalle || {}, a = b.actor_nombre || 'Alguien';
@@ -32,6 +33,9 @@ function textoBitacora(b) {
     case 'pin_desbloqueado': return `${a} quitó el bloqueo de un PIN`;
     case 'pin_bloqueado': return `El PIN de ${a} se bloqueó por intentos fallidos`;
     case 'admin_entro_como': return `${a} entró como ${d.nombre} (sin PIN)`;
+    case 'solicitud_creada': return `Desde el celular del club pidieron un usuario para ${d.nombre}`;
+    case 'solicitud_aprobada': return `${a} aprobó la solicitud de ${d.nombre}`;
+    case 'solicitud_rechazada': return `${a} rechazó la solicitud de ${d.nombre}`;
     case 'usuario_eliminado': return `${a} eliminó a ${d.nombre}`;
     case 'cuenta_vinculada': return `${a} activó su cuenta`;
     case 'foto_actualizada': return `${a} cambió una foto de perfil`;
@@ -57,19 +61,20 @@ async function copiar(texto) {
 }
 
 export async function montarUsuarios(el, ctx, yo) {
-  let datos = { perfiles: [], invitaciones: [], bitacora: [] };
+  let datos = { perfiles: [], invitaciones: [], solicitudes: [], bitacora: [] };
   let vivo = true;
   ctx.alDesmontar(() => { vivo = false; });
 
   async function cargar({ silencioso = false } = {}) {
     if (!silencioso) el.innerHTML = '<p class="cargando">Cargando usuarios…</p>';
     try {
-      const [perfiles, invitaciones, bitacora] = await Promise.all([
+      const [perfiles, invitaciones, solicitudes, bitacora] = await Promise.all([
         api.seleccionar('perfiles', 'select=id,nombre_completo,email,celular,rol,estado,tiene_pin,pin_bloqueado_hasta,foto_path,foto_actualizada,origen,creado_en&order=creado_en.asc'),
         api.seleccionar('invitaciones', 'select=id,email,rol,expira_en,correo_enviado_en,correo_error,reenvios,creada_en&estado=eq.pendiente&order=creada_en.desc'),
+        api.seleccionar('solicitudes_usuario', 'select=id,nombre_completo,email,celular,foto_path,creada_en&estado=eq.pendiente&order=creada_en.asc'),
         api.seleccionar('bitacora', 'select=id,creado_en,actor_nombre,accion,detalle&order=id.desc&limit=40'),
       ]);
-      datos = { perfiles, invitaciones, bitacora };
+      datos = { perfiles, invitaciones, solicitudes, bitacora };
     } catch (e) {
       if (!vivo) return;
       if (e.codigo === 'sin_sesion') return ctx.recargar();
@@ -77,11 +82,11 @@ export async function montarUsuarios(el, ctx, yo) {
       $('[data-reintentar]', el).addEventListener('click', () => cargar());
       return;
     }
-    if (vivo) pintar();
+    if (vivo) { pintar(); document.dispatchEvent(new Event('ppstaff-solicitudes')); }
   }
 
   function pintar() {
-    const { perfiles, invitaciones, bitacora } = datos;
+    const { perfiles, invitaciones, solicitudes, bitacora } = datos;
     const filaPerfil = (p) => {
       const bloqueado = p.pin_bloqueado_hasta && new Date(p.pin_bloqueado_hasta) > new Date();
       const ins = [
@@ -103,13 +108,19 @@ export async function montarUsuarios(el, ctx, yo) {
         <span class="fila-acc"><button type="button" class="btn chico ghost" data-reenviar="${esc(i.id)}">Reenviar</button>
         <button type="button" class="enlace mal" data-cancelar-inv="${esc(i.id)}">Cancelar</button></span></div>`;
     };
+    const filaSol = (x) => `<div class="fila sol">${avatar(x, 'md')}
+        <span class="fila-txt"><b>${esc(x.nombre_completo)}</b><span>${esc(x.email)} · ${esc(formatoCelular(x.celular))}</span>
+        <span>Pidió ser Recepción · ${esc(fechaHora(x.creada_en))}</span></span>
+        <span class="fila-acc"><button type="button" class="btn chico" data-aprobar="${esc(x.id)}">Aceptar</button>
+        <button type="button" class="btn chico peligro-suave" data-rechazar="${esc(x.id)}">Rechazar</button></span></div>`;
     el.innerHTML = `<div class="enc-seccion"><h2>Usuarios</h2><button type="button" class="btn chico" data-agregar>＋ Agregar</button></div>
+      ${solicitudes.length ? `<h3 class="sub-titulo resaltado">Solicitudes de usuario (${solicitudes.length})</h3><div class="lista">${solicitudes.map(filaSol).join('')}</div>` : ''}
       ${invitaciones.length ? `<h3 class="sub-titulo">Invitaciones pendientes (${invitaciones.length})</h3><div class="lista">${invitaciones.map(filaInv).join('')}</div>` : ''}
       ${GRUPOS.map(([rol, titulo]) => {
         const l = perfiles.filter((p) => p.rol === rol);
         return l.length ? `<h3 class="sub-titulo">${titulo} (${l.length})</h3><div class="lista">${l.map(filaPerfil).join('')}</div>` : '';
       }).join('')}
-      ${!perfiles.some((p) => p.rol === 'recepcion') && !invitaciones.length ? '<div class="tarjeta vacio"><p>Todavía no hay recepcionistas.</p><p>Toca <b>＋ Agregar</b> e invita a la primera por correo.</p></div>' : ''}
+      ${!perfiles.some((p) => p.rol === 'recepcion') && !invitaciones.length && !solicitudes.length ? '<div class="tarjeta vacio"><p>Todavía no hay recepcionistas.</p><p>Toca <b>＋ Agregar</b> e invita a la primera por correo.</p></div>' : ''}
       <details class="bitacora"><summary>Registro de cambios</summary>
         ${bitacora.length ? `<ul>${bitacora.map((b) => `<li><span>${esc(fechaHora(b.creado_en))}</span> ${esc(textoBitacora(b))}</li>`).join('')}</ul>` : '<p class="detalle">Aún no hay cambios.</p>'}</details>`;
     hidratarAvatares(el);
@@ -130,6 +141,34 @@ export async function montarUsuarios(el, ctx, yo) {
         cargar({ silencioso: true });
       } catch (err) { aviso(err.message, 'error'); }
     });
+    const ap = t.closest('[data-aprobar]');
+    if (ap) {
+      const x = datos.solicitudes.find((q) => q.id === ap.dataset.aprobar);
+      if (!x) return;
+      if (!await confirmar({ titulo: 'Aceptar solicitud', texto: `Se creará el usuario de ${x.nombre_completo} como Recepción, con el PIN que eligió. ¿Aceptar?`, ok: 'Aceptar y crear usuario' })) return;
+      return conOcupado(ap, async () => {
+        try {
+          const r = await api.funcion('aprobar_solicitud', { solicitud_id: x.id });
+          if (!r.ok) { aviso(msg(r), 'error'); return cargar({ silencioso: true }); }
+          aviso(`Listo: ${x.nombre_completo} ya puede entrar desde el celular del club.`, 'ok', 5000);
+          cargar({ silencioso: true });
+        } catch (err) { aviso(err.message, 'error'); }
+      });
+    }
+    const rz = t.closest('[data-rechazar]');
+    if (rz) {
+      const x = datos.solicitudes.find((q) => q.id === rz.dataset.rechazar);
+      if (!x) return;
+      if (!await confirmar({ titulo: 'Rechazar solicitud', texto: `Se descartará la solicitud de ${x.nombre_completo}. Podrá volver a pedirla si fue un error.`, ok: 'Rechazar', peligro: true })) return;
+      return conOcupado(rz, async () => {
+        try {
+          const r = await api.funcion('rechazar_solicitud', { solicitud_id: x.id });
+          if (!r.ok) { aviso(msg(r), 'error'); return cargar({ silencioso: true }); }
+          aviso('Solicitud rechazada.', 'ok');
+          cargar({ silencioso: true });
+        } catch (err) { aviso(err.message, 'error'); }
+      });
+    }
     const ca = t.closest('[data-cancelar-inv]');
     if (ca) {
       if (!await confirmar({ titulo: 'Cancelar invitación', texto: 'La persona ya no podrá usar el enlace que recibió. ¿Cancelar la invitación?', ok: 'Cancelar invitación', peligro: true })) return;

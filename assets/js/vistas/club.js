@@ -2,7 +2,8 @@
 // También sirve para "Entrar como" del administrador (sin PIN, con aviso arriba).
 import * as api from '../api.js';
 import { APP_VERSION } from '../config.js';
-import { esc, $, $$, avatar, hidratarAvatares, aviso, primerNombre, horaCorta } from '../ui.js';
+import { esc, $, $$, avatar, hidratarAvatares, aviso, primerNombre, horaCorta, ventana, conOcupado, selectorFoto,
+         campoPin, activarMostrar, soloNumeros, pinValido, celularValido, MENSAJE_PIN, mostrarError, quitarError } from '../ui.js';
 
 const LLAVE_PIN = 'ppstaff-pin';
 const LLAVE_PERSONAL = 'ppstaff-personal';
@@ -22,9 +23,11 @@ async function crearClub(raiz, ctx, { porAdmin, inicial }) {
   // ---------- selector de usuario ----------
   async function pantallaSelector() {
     raiz.innerHTML = `<main class="pantalla">
-      <header class="cab-club"><div class="logo-chip chico" aria-hidden="true">PP</div><div><h1>¿Quién eres?</h1><p class="sub">Toca tu nombre</p></div></header>
+      <header class="cab-club"><div class="logo-chip chico" aria-hidden="true">PP</div><div><h1>¿Quién eres?</h1><p class="sub">Toca tu nombre</p></div>
+        ${porAdmin ? '' : '<button type="button" class="btn-mas" data-pedir aria-label="Pedir un usuario nuevo" title="Pedir un usuario nuevo">＋</button>'}</header>
       <div class="tiles" id="tiles"><p class="cargando">Cargando…</p></div>
       <p class="pie"><a href="#/diagnostico">Diagnóstico</a> · versión ${esc(APP_VERSION)}</p></main>`;
+    $('[data-pedir]', raiz)?.addEventListener('click', ventanaSolicitud);
     let personal = null, sinRed = false;
     try { personal = await api.rpc('listar_personal'); api.guardarLocal(LLAVE_PERSONAL, personal); }
     catch (e) {
@@ -35,9 +38,11 @@ async function crearClub(raiz, ctx, { porAdmin, inicial }) {
     const cont = $('#tiles', raiz);
     if (!personal.length) {
       cont.innerHTML = `<div class="tarjeta vacio"><p><b>${sinRed ? 'Sin internet.' : 'Aún no hay usuarios.'}</b></p>
-        <p>${sinRed ? 'Conecta el celular a internet y vuelve a intentar.' : 'Pide al administrador que invite a las recepcionistas.'}</p>
+        <p>${sinRed ? 'Conecta el celular a internet y vuelve a intentar.' : 'Toca el botón para pedir tu usuario. El administrador lo revisa y, si lo aprueba, ya puedes entrar.'}</p>
+        ${sinRed || porAdmin ? '' : '<button class="btn" data-pedir-vacio>＋ Pedir mi usuario</button>'}
         <button class="btn ghost" data-reintentar>Volver a intentar</button></div>`;
       $('[data-reintentar]', cont).addEventListener('click', pantallaSelector);
+      $('[data-pedir-vacio]', cont)?.addEventListener('click', ventanaSolicitud);
       return;
     }
     cont.innerHTML = personal.map((p) => `<button type="button" class="tile-usuario" data-id="${esc(p.id)}">
@@ -50,6 +55,48 @@ async function crearClub(raiz, ctx, { porAdmin, inicial }) {
       const p = personal.find((x) => x.id === b.dataset.id);
       if (!p.tiene_pin) return aviso('Esta persona todavía no tiene PIN. Pide al administrador que lo asigne.', 'error');
       pantallaPin(p);
+    });
+  }
+
+  // ---------- pedir un usuario nuevo ----------
+  function ventanaSolicitud() {
+    const v = ventana(`<form class="formulario" id="f-sol" novalidate>
+      <p class="detalle">Llena tus datos. El administrador recibe la solicitud y, cuando la apruebe, tu nombre aparecerá en esta pantalla.</p>
+      <div class="campo"><label for="s-nombre">Nombre completo</label>
+        <input id="s-nombre" type="text" autocomplete="off" autocapitalize="words" placeholder="Nombre y apellido" required></div>
+      <div class="campo"><label for="s-email">Correo</label>
+        <input id="s-email" type="email" inputmode="email" autocapitalize="off" spellcheck="false" autocomplete="off" placeholder="nombre@correo.com" required></div>
+      <div class="campo"><label for="s-cel">Celular</label>
+        <input id="s-cel" type="tel" inputmode="numeric" autocomplete="off" placeholder="10 dígitos" required></div>
+      ${campoPin('s-pin', 'PIN (4 números)', 'Con este PIN vas a entrar. No lo compartas.')}
+      ${campoPin('s-pin2', 'Repite tu PIN')}
+      <div class="campo"><label>Foto de perfil</label><div id="s-foto"></div></div>
+      <button class="btn" type="submit">Enviar solicitud</button></form>`, { titulo: 'Pedir un usuario' });
+    activarMostrar(v.el);
+    soloNumeros(v.el);
+    const form = $('#f-sol', v.el);
+    const foto = selectorFoto($('#s-foto', v.el), { nombre: '' });
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault(); quitarError(form);
+      const nombre = $('#s-nombre', form).value.trim().replace(/\s+/g, ' ');
+      const email = $('#s-email', form).value.trim();
+      const cel = $('#s-cel', form).value;
+      const pin = $('#s-pin', form).value, pin2 = $('#s-pin2', form).value;
+      if (nombre.length < 3 || !nombre.includes(' ')) return mostrarError(form, 'Escribe tu nombre completo (nombre y apellido).');
+      if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) return mostrarError(form, 'Escribe un correo válido.');
+      if (!celularValido(cel)) return mostrarError(form, 'El celular debe tener 10 dígitos.');
+      if (!pinValido(pin)) return mostrarError(form, MENSAJE_PIN);
+      if (pin !== pin2) return mostrarError(form, 'Los dos PIN no coinciden.');
+      await conOcupado($('button[type=submit]', form), async () => {
+        try {
+          const r = await api.funcion('solicitar', { nombre_completo: nombre, email, celular: cel, pin, foto: foto.valor() });
+          if (!r.ok) return mostrarError(form, r.mensaje || 'No se pudo enviar la solicitud.');
+          v.poner(`<div class="exito"><div class="palomita" aria-hidden="true">✓</div>
+            <h2>¡Solicitud enviada, ${esc(primerNombre(r.nombre_completo))}!</h2>
+            <p class="detalle">El administrador la va a revisar. Cuando la apruebe, tu nombre aparecerá en esta pantalla y podrás entrar con tu PIN.</p>
+            <button type="button" class="btn" data-cerrar>Listo</button></div>`);
+        } catch (err) { mostrarError(form, err.codigo === 'sin_conexion' ? 'Sin internet. Revisa la conexión e intenta de nuevo.' : err.message); }
+      });
     });
   }
 

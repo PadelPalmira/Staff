@@ -235,3 +235,18 @@ button.fila:active{border-color:var(--cyan)}
 .card[data-state="ok"]{border-color:rgba(52,211,153,.35)}
 .card[data-state="bad"]{border-color:rgba(251,113,133,.35)}
 .card .btn{margin-top:12px}
+
+/* ---------- solicitudes de usuario ---------- */
+.btn-mas{margin-left:auto;flex:none;width:52px;height:52px;border-radius:50%;border:0;background:var(--grad);color:#06181a;font:700 30px/1 var(--font);cursor:pointer;
+  display:grid;place-items:center;padding:0 0 3px}
+.btn-mas:active{transform:scale(.95)}
+.cab-club .btn-mas{margin-left:auto}
+.punto-aviso{position:absolute;top:6px;right:calc(50% - 30px);min-width:18px;height:18px;padding:0 5px;border-radius:9px;background:var(--pink);color:#fff;
+  font:700 11px/18px var(--font);font-style:normal;text-align:center}
+.tabs button{position:relative}
+.tarjeta-solicitud{border-color:var(--pink);background:linear-gradient(135deg,rgba(255,0,193,.10),rgba(0,242,234,.06))}
+.tarjeta-solicitud .btn{margin-top:10px}
+.sub-titulo.resaltado{color:var(--pink)}
+.fila.sol{flex-wrap:wrap;cursor:default;border-color:rgba(255,0,193,.35)}
+.fila.sol .fila-txt span{white-space:normal}
+.tiles .tarjeta.vacio{grid-column:1/-1}
