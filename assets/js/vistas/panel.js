@@ -6,12 +6,13 @@ import { montarUsuarios } from './usuarios.js';
 import { montarTurnos, pintarEnVivo, verTurno, pintarAvisos, contarAvisos } from './turnos.js';
 import { montarTareasAdmin } from './tareas_admin.js';
 import { montarAjustes } from './ajustes.js';
+import { montarInventario } from './inventario.js';
 
 const LLAVE_TAB = 'ppstaff-tab';
 
 export function montarPanel(raiz, ctx, yo) {
   const esAdmin = yo.rol === 'admin';
-  const tabs = [['inicio', 'Inicio', '⌂'], ['turnos', 'Turnos', '◷'], ['tareas', 'Tareas', '✓'],
+  const tabs = [['inicio', 'Inicio', '⌂'], ['turnos', 'Turnos', '◷'], ['tareas', 'Tareas', '✓'], ['inventario', 'Inventario', '▤'],
     ...(esAdmin ? [['usuarios', 'Usuarios', '☺'], ['ajustes', 'Ajustes', '⚙']] : [])];
   let actual = api.leerLocal(LLAVE_TAB);
   if (!tabs.some((t) => t[0] === actual)) actual = 'inicio';
@@ -86,6 +87,7 @@ export function montarPanel(raiz, ctx, yo) {
     else if (id === 'turnos') montarTurnos(nuevo, ctx, yo);
     else if (id === 'tareas') montarTareasAdmin(nuevo, ctx, yo);
     else if (id === 'ajustes') montarAjustes(nuevo, ctx, yo);
+    else if (id === 'inventario') montarInventario(nuevo, ctx, yo);
     else montarInicio(nuevo);
     window.scrollTo(0, 0);
   }

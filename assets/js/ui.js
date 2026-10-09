@@ -127,7 +127,7 @@ export async function comprimirFoto(file, lado = 320) {
   return c.toDataURL('image/jpeg', 0.82);
 }
 // Foto de evidencia de una tarea: lado largo máximo 900 px, JPEG liviano (~60-90 KB). Devuelve un Blob.
-export async function comprimirEvidencia(file, lado = 900) {
+export async function comprimirEvidencia(file, lado = 900, calidad = 0.6) {
   const img = await cargarImagen(file);
   const w = img.width || img.naturalWidth, h = img.height || img.naturalHeight;
   const k = Math.min(1, lado / Math.max(w, h));
@@ -136,7 +136,7 @@ export async function comprimirEvidencia(file, lado = 900) {
   const g = c.getContext('2d');
   g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height);
   g.drawImage(img, 0, 0, c.width, c.height);
-  return await new Promise((ok, mal) => c.toBlob((b) => (b ? ok(b) : mal(new Error('foto'))), 'image/jpeg', 0.6));
+  return await new Promise((ok, mal) => c.toBlob((b) => (b ? ok(b) : mal(new Error('foto'))), 'image/jpeg', calidad));
 }
 export function duracionTexto(min) {
   const m = Math.max(0, Math.round(min || 0));
@@ -219,3 +219,12 @@ export function mostrarError(raiz, texto) {
   el.scrollIntoView?.({ block: 'nearest', behavior: 'smooth' });
 }
 export const quitarError = (raiz) => $('.error-form', raiz)?.remove();
+
+// números de inventario: hasta 3 decimales, sin ceros de más
+export const cantidad = (n) => (n == null || n === '' ? '' : String(Math.round(Number(n) * 1000) / 1000));
+export const pesos = (n) => '$' + (Math.round(Number(n || 0) * 100) / 100).toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 2 });
+export const plural = (txt, n) => {
+  if (Number(n) === 1 || !txt) return txt;
+  if (/^(ml|l|g|gr|kg|oz|lt|cc)$/i.test(txt) || txt.includes(' ')) return txt;
+  return /[aeiouáéó]$/i.test(txt) ? txt + 's' : /s$/i.test(txt) ? txt : /z$/i.test(txt) ? txt.slice(0, -1) + 'ces' : /ón$/i.test(txt) ? txt.slice(0, -2) + 'ones' : txt + 'es';
+};

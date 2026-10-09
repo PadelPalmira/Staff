@@ -1,5 +1,6 @@
 // Pantalla del empleado (después de poner su PIN): Inicio (abrir turno) y Tareas (checklist y cierre).
 import * as api from '../api.js';
+import { montarInventarioEmp } from './inventario_emp.js';
 import { esc, $, $$, avatar, hidratarAvatares, aviso, ventana, confirmar, conOcupado, primerNombre, horaCorta, comprimirEvidencia, duracionTexto, ROL } from '../ui.js';
 
 const TZ = 'America/Mexico_City';
@@ -13,7 +14,7 @@ const msg = (r) => ERR[r?.error] || r?.mensaje || 'No se pudo completar. Intenta
 const SECCIONES = [['apertura', 'Al abrir el turno'], ['semanal', 'Semanales de hoy'], ['cierre', 'Al cerrar el turno']];
 
 export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolverAdmin, alSesionInvalida }) {
-  let est = null, tab = 'inicio', muerto = false;
+  let est = null, tab = 'inicio', muerto = false, inv = null, invEst = null;
   const limpiezas = [];
 
   async function llamar(nombre, args = {}) {
@@ -38,6 +39,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     <nav class="tabs" aria-label="Secciones">
       <button type="button" data-tab="inicio" aria-current="true"><span aria-hidden="true">⌂</span>Inicio</button>
       <button type="button" data-tab="tareas" aria-current="false"><span aria-hidden="true">✓</span>Tareas<i class="punto-aviso" data-badge hidden></i></button>
+      <button type="button" data-tab="inventario" aria-current="false"><span aria-hidden="true">▤</span>Inventario<i class="punto-aviso amarillo" data-badge-inv hidden></i></button>
     </nav></div>`;
   hidratarAvatares(raiz);
   $('[data-salir]', raiz).addEventListener('click', alSalir);
@@ -47,12 +49,19 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
   function ir(t) {
     tab = t;
     $$('.tabs button', raiz).forEach((b) => b.setAttribute('aria-current', String(b.dataset.tab === t)));
-    pintar();
+    pintar(true);
     window.scrollTo(0, 0);
   }
 
   // ---------- datos ----------
+  function badgeInv(r) {
+    invEst = r;
+    const n = (r?.conteo ? 1 : 0) + (r?.cobros || []).filter((b) => !b.visto_en).length;
+    const b = $('[data-badge-inv]', raiz);
+    if (b) { b.hidden = !n; b.textContent = n ? String(n) : ''; }
+  }
   async function cargar({ silencioso = false } = {}) {
+    llamar('inv_emp_estado').then((ri) => { if (!muerto && ri.ok) { const antes = !!invEst?.conteo; badgeInv(ri); if (tab === 'inicio' && antes !== !!ri.conteo) pintar(); } });
     const r = await llamar('turno_hoy');
     if (muerto) return;
     if (!r.ok) {
@@ -74,7 +83,12 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
   const hechas = (t) => t.filter((x) => x.estado !== 'pendiente').length;
   const vencida = (x) => x.estado === 'pendiente' && x.limite && new Date(x.limite) < new Date();
 
-  function pintar() {
+  function pintar(forzar = false) {
+    if (tab === 'inventario') {
+      if (!inv || forzar) { inv?.destruir(); inv = montarInventarioEmp($('#emp-cont', raiz), { llamar, alCambio: badgeInv }); }
+      return;
+    }
+    if (inv) { inv.destruir(); inv = null; }
     if (!est) return;
     const badge = $('[data-badge]', raiz);
     const venc = est.mio ? est.mio.tareas.filter(vencida).length : 0;
@@ -96,6 +110,8 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
   function vistaInicio() {
     const hoy = new Date(est.ahora).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ });
     let h = `<h2 class="saludo">Hola, ${esc(primerNombre(perfil.nombre_completo))}</h2><p class="sub cap">${esc(hoy)}</p>`;
+    if (invEst?.conteo) h += `<section class="tarjeta conteo-pend"><h2>📋 Hoy toca conteo de inventario</h2><p class="detalle">Sin clientes ni tickets abiertos, antes de las ${esc(invEst.conteo.limite)}.</p>
+      <button type="button" class="btn" data-ir-inv>Ir a Inventario</button></section>`;
     if (est.dia_cerrado) h += `<p class="nota-aviso">Hoy está marcado como día cerrado${est.motivo_cerrado ? `: ${esc(est.motivo_cerrado)}` : ''}.</p>`;
     if (est.mio) {
       const t = est.mio, total = t.tareas.length, ok = hechas(t.tareas), venc = t.tareas.filter(vencida).length;
@@ -278,6 +294,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     const t = e.target;
     if (t.closest('[data-ir-tareas]')) return ir('tareas');
     if (t.closest('[data-ir-inicio]')) return ir('inicio');
+    if (t.closest('[data-ir-inv]')) return ir('inventario');
     const ab = t.closest('[data-abrir]');
     if (ab) return conOcupado(ab, () => abrir(ab.dataset.abrir));
     if (t.closest('[data-ver-resumen]')) {
@@ -300,5 +317,5 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
   });
 
   cargar();
-  return { destruir() { muerto = true; limpiezas.splice(0).forEach((f) => f()); } };
+  return { destruir() { muerto = true; inv?.destruir(); limpiezas.splice(0).forEach((f) => f()); } };
 }
