@@ -1,7 +1,8 @@
 // Inventario para admin y gerencia: Pedidos (verificar), Conteos (iniciar, revisar, cobrar), Loyverse (sincronizar) y Catálogo (+ ajustes).
 import * as api from '../api.js';
-import { esc, $, $$, aviso, ventana, confirmar, conOcupado, fechaCorta, fechaHora, horaCorta, cantidad, pesos, plural } from '../ui.js';
+import { esc, $, $$, aviso, ventana, confirmar, conOcupado, fechaCorta, fechaHora, horaCorta, cantidad, pesos, plural, comprimirEvidencia } from '../ui.js';
 import { leerExportLoyverse, generarImportacion, descargarTexto, leerArchivo } from '../csv.js';
+import { estiloCategoria, miniArticulo, hidratarFotosArticulos } from '../categorias.js';
 
 const ERR = {
   sin_permiso: 'No tienes permiso para esto.', no_existe: 'Ya no existe.', ya_cargado: 'Ese pedido ya se cargó a Loyverse.',
@@ -12,7 +13,7 @@ const ERR = {
   valor_invalido: 'Valor no válido.', factor_invalido: 'La equivalencia debe ser mayor a 0.', perfil_invalido: 'Hay un empleado que ya no existe.',
 };
 const msg = (r) => ERR[r?.error] || r?.mensaje || 'No se pudo completar. Intenta de nuevo.';
-const COLS_ART = 'id,handle,nombre,categoria,sigue_inventario,tiene_receta,precio,costo,activo,es_insumo,unidad,empaque_nombre,empaque_factor,familia,en_ultimo_export';
+const COLS_ART = 'id,handle,nombre,categoria,sigue_inventario,tiene_receta,precio,costo,activo,es_insumo,unidad,empaque_nombre,empaque_factor,familia,en_ultimo_export,foto_path,foto_v';
 const contable = (a) => a.activo && a.sigue_inventario && !a.tiene_receta && a.en_ultimo_export;
 const fecha = (d) => fechaCorta(`${d}T12:00:00`);
 const unidadTxt = (a, n) => plural(a?.unidad || 'pieza', n);
@@ -38,23 +39,31 @@ const inputArchivo = (id) => `<label class="btn ghost archivo" for="${id}">📄 
 
 export function montarInventario(el, ctx, yo) {
   let seg = api.leerLocal('ppstaff-inv-seg') || 'pedidos';
+  if (!['pedidos', 'conteos', 'catalogo'].includes(seg)) seg = 'pedidos';
   el.innerHTML = `<div class="enc-seccion"><h2>Inventario</h2></div>
-    <div class="segmentos cuatro" role="tablist"><button type="button" data-seg="pedidos">Pedidos</button><button type="button" data-seg="conteos">Conteos</button>
-      <button type="button" data-seg="loyverse">Loyverse</button><button type="button" data-seg="catalogo">Catálogo</button></div>
+    <div class="segmentos tres" role="tablist"><button type="button" data-seg="pedidos">📦 Pedidos</button><button type="button" data-seg="conteos">📋 Conteos</button>
+      <button type="button" data-seg="catalogo">🗂️ Catálogo</button></div>
     <div id="inv-cont"></div>`;
   function poner(s) {
     seg = s; api.guardarLocal('ppstaff-inv-seg', s);
     $$('[data-seg]', el).forEach((b) => b.setAttribute('aria-selected', String(b.dataset.seg === s)));
     const actual = $('#inv-cont', el);
     const nuevo = actual.cloneNode(false); actual.replaceWith(nuevo);
-    ({ pedidos: segPedidos, conteos: segConteos, loyverse: segLoyverse, catalogo: segCatalogo })[s](nuevo, yo, poner);
+    ({ pedidos: segPedidosYCarga, conteos: segConteos, catalogo: segCatalogo })[s](nuevo, yo, poner);
   }
   $('.segmentos', el).addEventListener('click', (e) => { const b = e.target.closest('[data-seg]'); if (b) poner(b.dataset.seg); });
   poner(seg);
 }
 
-// ================= PEDIDOS =================
-async function segPedidos(el) {
+// ================= PEDIDOS (+ subir a Loyverse) =================
+function segPedidosYCarga(el) {
+  el.innerHTML = '<div id="inv-sync"></div><div id="inv-peds"></div>';
+  const recargar = () => segPedidosYCarga(el);
+  segLoyverse($('#inv-sync', el), recargar);
+  segPedidos($('#inv-peds', el), recargar);
+}
+
+async function segPedidos(el, recargar) {
   el.innerHTML = '<p class="cargando">Cargando…</p>';
   let peds, arts;
   try {
@@ -72,11 +81,11 @@ async function segPedidos(el) {
     return `<button type="button" class="fila" data-ped="${esc(p.id)}"><div class="fila-txt"><b>${esc(p.perfil_nombre)}${p.proveedor ? ` · ${esc(p.proveedor)}` : ''}</b>
       <span>${esc(fechaHora(p.creado_en))} · ${its.length} artículo${its.length === 1 ? '' : 's'}${nuevos ? ` · <span class="warn-txt">${nuevos} nuevo${nuevos === 1 ? '' : 's'}</span>` : ''}</span></div>${ins}</button>`;
   }
-  if (!peds.length) { el.innerHTML = '<div class="tarjeta vacio"><p><b>Todavía no hay pedidos.</b></p><p>Los empleados los registran desde el celular del club (Inventario > Recibir pedido).</p></div>'; return; }
+  if (!peds.length) { el.innerHTML = '<h3 class="sub-titulo">Pedidos recibidos</h3><div class="tarjeta vacio"><p><b>Todavía no hay pedidos.</b></p><p>Los empleados los registran desde el celular del club (Inventario > Recibir pedido).</p></div>'; return; }
   el.innerHTML = grupo('Por verificar', peds.filter((p) => p.estado === 'enviado'), '<p class="ayuda">Compara lo capturado contra la foto del ticket.</p>')
     + grupo('Verificados, por cargar a Loyverse', peds.filter((p) => p.estado === 'verificado'))
     + grupo('Anteriores', peds.filter((p) => p.estado === 'cargado' || p.estado === 'cancelado').slice(0, 20));
-  el.onclick = (e) => { const b = e.target.closest('[data-ped]'); if (b) verPedido(peds.find((p) => p.id === b.dataset.ped), arts, mapa, () => segPedidos(el)); };
+  el.onclick = (e) => { const b = e.target.closest('[data-ped]'); if (b) verPedido(peds.find((p) => p.id === b.dataset.ped), arts, mapa, recargar); };
 }
 
 async function verPedido(p, arts, mapa, alCambiar) {
@@ -304,7 +313,7 @@ async function verConteo(id, alCambiar) {
 }
 
 // ================= LOYVERSE (sincronizar) =================
-async function segLoyverse(el) {
+async function segLoyverse(el, recargar) {
   el.innerHTML = '<p class="cargando">Cargando…</p>';
   let peds, conts, cargas, ajustes;
   try {
@@ -318,20 +327,20 @@ async function segLoyverse(el) {
   const aj = Object.fromEntries(ajustes.map((a) => [a.clave, a.valor]));
   const ver = peds.filter((p) => p.estado === 'verificado').length, sinVer = peds.filter((p) => p.estado === 'enviado').length;
   const diasTxt = String(aj.inv_carga_dias || '5').split(',').map((d) => ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'][d]).join(' y ');
-  let h = `<section class="tarjeta"><h2>Sincronizar Loyverse</h2>
+  let h = `<section class="tarjeta subir-loyverse ${!ver && !conts.length ? 'al-dia' : ''}"><h2>⬆︎ Subir pedidos a Loyverse</h2>
     <p class="detalle">Toca los ${esc(diasTxt)} a las ${esc(aj.inv_carga_hora || '09:00')}. Pendiente: <b>${ver}</b> pedido${ver === 1 ? '' : 's'} verificado${ver === 1 ? '' : 's'}${conts.length ? ` y el ajuste de ${conts.length} conteo${conts.length === 1 ? '' : 's'}` : ''}.</p>
-    ${sinVer ? `<p class="nota-aviso">${sinVer} pedido${sinVer === 1 ? '' : 's'} sin verificar no entra${sinVer === 1 ? '' : 'n'} en esta carga. Verifícalos primero en Pedidos.</p>` : ''}`;
-  if (!ver && !conts.length) h += '<p class="nota-info">No hay nada pendiente por cargar. 👍</p></section>';
+    ${sinVer ? `<p class="nota-aviso">${sinVer} pedido${sinVer === 1 ? '' : 's'} sin verificar no entra${sinVer === 1 ? '' : 'n'} en esta carga. Verifícalos primero (abajo).</p>` : ''}`;
+  if (!ver && !conts.length) h += '<p class="nota-info">✓ Loyverse está al día: no hay pedidos verificados por subir.</p></section>';
   else h += `<ol class="pasos"><li>Que no haya clientes ni tickets abiertos (si se vende algo durante estos minutos, Loyverse lo perdería).</li>
       <li>En Loyverse: Artículos › Lista de artículos › <b>Exportar</b>, y sube aquí ese archivo.</li>
       <li>Descarga el archivo que genera la app e impórtalo en Loyverse (Artículos › <b>Importar</b>).</li><li>Regresa y toca “Ya lo importé”.</li></ol>
       ${inputArchivo('ly-archivo')}<div id="ly-res"></div></section>`;
-  h += `<h3 class="sub-titulo">Últimas cargas</h3>${cargas.length ? `<div class="lista">${cargas.map((g) => `<div class="fila inv"><div class="fila-txt"><b>${esc(fechaHora(g.creado_en))}</b>
+  h += `<details class="bitacora" ${cargas.some((g) => !g.confirmado_en) ? 'open' : ''}><summary>Últimas subidas a Loyverse</summary>${cargas.length ? `<div class="lista">${cargas.map((g) => `<div class="fila inv"><div class="fila-txt"><b>${esc(fechaHora(g.creado_en))}</b>
     <span>${g.pedidos.length} pedido${g.pedidos.length === 1 ? '' : 's'}${g.conteos.length ? ` · ajuste de ${g.conteos.length} conteo${g.conteos.length === 1 ? '' : 's'}` : ''}</span></div>
-    ${g.confirmado_en ? '<span class="insignia">Importada</span>' : `<button type="button" class="btn chico ghost" data-confirmar="${esc(g.id)}">Ya lo importé</button>`}</div>`).join('')}</div>` : '<p class="detalle">Todavía no hay cargas.</p>'}`;
-  h += `<details class="bitacora"><summary>Días y hora de la carga</summary>${formAjustesCarga(aj)}</details>`;
+    ${g.confirmado_en ? '<span class="insignia">Importada</span>' : `<button type="button" class="btn chico ghost" data-confirmar="${esc(g.id)}">Ya lo importé</button>`}</div>`).join('')}</div>` : '<p class="detalle">Todavía no hay subidas.</p>'}</details>`;
+  h += `<details class="bitacora"><summary>Días y hora para subir pedidos</summary>${formAjustesCarga(aj)}</details>`;
   el.innerHTML = h;
-  activarAjustes(el, () => segLoyverse(el));
+  activarAjustes(el, recargar);
   $('#ly-archivo', el)?.addEventListener('change', async (e) => {
     const f = e.target.files?.[0]; if (!f) return;
     const lbl = e.target.closest('label'); lbl.classList.add('ocupado');
@@ -360,7 +369,7 @@ async function segLoyverse(el) {
     conOcupado(b, async () => {
       const r = await rpc('inv_carga_confirmar', { p_id: b.dataset.confirmar });
       if (!r.ok) return aviso(msg(r), 'error');
-      aviso('Listo: pedidos marcados como cargados.', 'ok'); segLoyverse(el);
+      aviso('Listo: pedidos marcados como subidos a Loyverse.', 'ok'); recargar();
     });
   };
 }
@@ -370,27 +379,34 @@ async function segCatalogo(el) {
   el.innerHTML = '<p class="cargando">Cargando…</p>';
   let arts;
   try { arts = await articulos(); } catch (e) { el.innerHTML = `<div class="tarjeta vacio"><p>${esc(e.message)}</p></div>`; return; }
-  let filtro = '', soloInv = true;
+  let filtro = '', soloInv = true, catSel = null;
   const head = `<p class="sub">El catálogo se actualiza solo cada vez que se sube un export de Loyverse. Aquí defines empaques (ej. caja = 24 piezas, cartón = 1000 ml), insumos y familias de sabores.</p>
     ${arts.length ? '' : `<section class="tarjeta"><h2>Crear catálogo</h2><p class="detalle">Sube el export de artículos de Loyverse (Artículos › Exportar).</p>${inputArchivo('cat-archivo')}</section>`}
     <div class="conteo-barra"><input id="cat-buscar" type="text" placeholder="Buscar…" autocomplete="off">
       <label class="interruptor chico"><input type="checkbox" id="cat-solo" checked><span>Solo con inventario</span></label></div>
+    <div class="cat-chips" id="cat-chips"></div>
     <div id="cat-lista"></div>
     ${arts.length ? `<details class="bitacora"><summary>Actualizar catálogo desde Loyverse</summary><p class="ayuda">Úsalo si diste de alta artículos nuevos en Loyverse.</p>${inputArchivo('cat-archivo')}</details>` : ''}`;
   el.innerHTML = head;
   const lista = $('#cat-lista', el);
   function pintar() {
-    const l = arts.filter((a) => (!soloInv || (a.sigue_inventario && !a.tiene_receta)) && (!filtro || a.nombre.toLowerCase().includes(filtro)));
-    const cats = [...new Set(l.map((a) => a.categoria || 'Sin categoría'))];
-    lista.innerHTML = cats.map((cat) => `<h3 class="sub-titulo">${esc(cat)}</h3><div class="lista">${l.filter((a) => (a.categoria || 'Sin categoría') === cat).map((a) => `
-      <button type="button" class="fila ${contable(a) ? '' : 'apagada'}" data-art="${esc(a.id)}"><div class="fila-txt"><b>${esc(a.nombre)}</b>
+    const base = arts.filter((a) => (!soloInv || (a.sigue_inventario && !a.tiene_receta)) && (!filtro || a.nombre.toLowerCase().includes(filtro)));
+    const todas = [...new Set(base.map((a) => a.categoria || 'Sin categoría'))];
+    $('#cat-chips', el).innerHTML = `<button type="button" class="cat-chip ${catSel ? '' : 'activa'}" style="--cat:#94a3b8" data-cat-sel=""><span>🗂️</span>Todas<i>${base.length}</i></button>`
+      + todas.map((cat) => { const e = estiloCategoria(cat); const n = base.filter((a) => (a.categoria || 'Sin categoría') === cat).length;
+        return `<button type="button" class="cat-chip ${catSel === cat ? 'activa' : ''}" style="--cat:${e.color}" data-cat-sel="${esc(cat)}"><span>${e.emoji}</span>${esc(cat)}<i>${n}</i></button>`; }).join('');
+    const cats = catSel ? todas.filter((c) => c === catSel) : todas;
+    lista.innerHTML = cats.map((cat) => { const e = estiloCategoria(cat); return `<section class="cat-conteo" style="--cat:${e.color}"><div class="cat-enc"><span class="cat-emoji">${e.emoji}</span><b>${esc(cat)}</b></div><div class="lista">${base.filter((a) => (a.categoria || 'Sin categoría') === cat).map((a) => `
+      <button type="button" class="fila art-cat ${contable(a) ? '' : 'apagada'}" data-art="${esc(a.id)}">${miniArticulo(a, 46)}<div class="fila-txt"><b>${esc(a.nombre)}</b>
       <span>${a.precio != null ? esc(pesos(a.precio)) : 'precio variable'} · ${a.empaque_nombre ? `1 ${esc(a.empaque_nombre)} = ${esc(cantidad(a.empaque_factor))} ${esc(unidadTxt(a, a.empaque_factor))}` : esc(a.unidad)}${a.familia ? ` · familia ${esc(a.familia)}` : ''}</span></div>
-      <div class="fila-ins">${!a.activo ? '<span class="insignia gris">Inactivo</span>' : ''}${a.es_insumo ? '<span class="insignia aviso-i">Insumo</span>' : ''}${a.tiene_receta ? '<span class="insignia gris">Receta</span>' : ''}${!a.en_ultimo_export ? '<span class="insignia mal">Ya no está en Loyverse</span>' : ''}</div></button>`).join('')}</div>`).join('')
+      <div class="fila-ins">${!a.activo ? '<span class="insignia gris">Inactivo</span>' : ''}${a.es_insumo ? '<span class="insignia aviso-i">Insumo</span>' : ''}${a.tiene_receta ? '<span class="insignia gris">Receta</span>' : ''}${!a.en_ultimo_export ? '<span class="insignia mal">Ya no está en Loyverse</span>' : ''}</div></button>`).join('')}</div></section>`; }).join('')
       || '<p class="detalle">Sin resultados.</p>';
+    hidratarFotosArticulos(lista, api);
   }
   pintar();
   $('#cat-buscar', el).addEventListener('input', (e) => { filtro = e.target.value.trim().toLowerCase(); pintar(); });
   $('#cat-solo', el).addEventListener('change', (e) => { soloInv = e.target.checked; pintar(); });
+  $('#cat-chips', el).addEventListener('click', (e) => { const b = e.target.closest('[data-cat-sel]'); if (b) { catSel = b.dataset.catSel || null; pintar(); } });
   $$('#cat-archivo', el).forEach((inp) => inp.addEventListener('change', async (e) => {
     const f = e.target.files?.[0]; if (!f) return;
     const sub = await subirExport(f, 'catalogo');
@@ -400,7 +416,9 @@ async function segCatalogo(el) {
     const b = e.target.closest('[data-art]'); if (!b) return;
     const a = arts.find((x) => x.id === b.dataset.art);
     const v = ventana(`<form class="formulario" novalidate>
-      <p class="detalle" style="margin-top:0">${esc(a.categoria || '')} · ${a.precio != null ? esc(pesos(a.precio)) : 'precio variable'}${a.costo != null ? ` · costo ${esc(pesos(a.costo))}` : ''}</p>
+      <div class="foto-art">${miniArticulo(a, 84)}<div><p class="detalle" style="margin-top:0">${esc(a.categoria || '')} · ${a.precio != null ? esc(pesos(a.precio)) : 'precio variable'}${a.costo != null ? ` · costo ${esc(pesos(a.costo))}` : ''}</p>
+        <label class="btn chico ghost archivo">📷 ${a.foto_path ? 'Cambiar foto' : 'Poner foto'}<input type="file" accept="image/*" id="ar-foto"></label>
+        <p class="ayuda">La foto ayuda a reconocerlo al contar y al recibir pedidos.</p></div></div>
       <label class="interruptor"><input type="checkbox" id="ar-act" ${a.activo ? 'checked' : ''}><span>Activo (se cuenta y se puede recibir)</span></label>
       <label class="interruptor"><input type="checkbox" id="ar-ins" ${a.es_insumo ? 'checked' : ''}><span>Es insumo de recetas (leche, jamón, pan…): sale en el reporte pero no se cobra</span></label>
       <div class="campo"><label for="ar-uni">Unidad en Loyverse</label><input id="ar-uni" type="text" value="${esc(a.unidad)}" placeholder="pieza, ml, rebanada, gramo"></div>
@@ -409,6 +427,22 @@ async function segCatalogo(el) {
       <p class="ayuda">Ej. Leche: unidad “ml”, empaque “cartón”, 1000. Jamón: unidad “rebanada”, empaque “paquete”, 20. Así el empleado cuenta cartones/paquetes y la app convierte.</p>
       <div class="campo"><label for="ar-fam">Familia <span class="opc">(para detectar cobros de otro sabor)</span></label><input id="ar-fam" type="text" value="${esc(a.familia || '')}" placeholder="Ej. Gatorade 1L"></div>
       <button class="btn" type="submit">Guardar</button></form>`, { titulo: a.nombre });
+    hidratarFotosArticulos(v.el, api);
+    $('#ar-foto', v.el).addEventListener('change', async (ev) => {
+      const f = ev.target.files?.[0]; if (!f) return;
+      const lbl = ev.target.closest('label'); lbl.classList.add('ocupado');
+      try {
+        const blob = await comprimirEvidencia(f, 500, 0.75);
+        const ruta = `${a.id}.jpg`;
+        await api.subirFoto(ruta, blob, 'articulos');
+        const r = await rpc('inv_articulo_guardar', { p_id: a.id, p_datos: { foto_path: ruta } });
+        if (!r.ok) return aviso(msg(r), 'error');
+        a.foto_path = ruta; a.foto_v = new Date().toISOString();
+        const m = $('.foto-art .mini-art', v.el); m.outerHTML = miniArticulo(a, 84); hidratarFotosArticulos(v.el, api);
+        aviso('Foto guardada.', 'ok'); pintar();
+      } catch (err) { aviso(`No se pudo subir la foto (${err.message || 'error'}).`, 'error'); }
+      finally { lbl.classList.remove('ocupado'); ev.target.value = ''; }
+    });
     $('form', v.el).addEventListener('submit', (ev) => {
       ev.preventDefault();
       conOcupado($('button[type=submit]', v.el), async () => {
@@ -435,6 +469,7 @@ function formAjustesConteo(aj, tipos) {
       ${tipos.map((t) => `<option value="${esc(t.clave)}" ${aj.inv_conteo_turno === t.clave ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}<option value="cualquiera" ${aj.inv_conteo_turno === 'cualquiera' ? 'selected' : ''}>Cualquiera</option></select></div>
     <div class="fila-botones" style="margin:0"><div class="campo"><label for="aj-av">Aviso si no hay export</label><input id="aj-av" type="time" data-clave="inv_conteo_aviso_hora" value="${esc(aj.inv_conteo_aviso_hora || '09:00')}"></div>
       <div class="campo"><label for="aj-lim">Hora límite del conteo</label><input id="aj-lim" type="time" data-clave="inv_conteo_hora_limite" value="${esc(aj.inv_conteo_hora_limite || '15:00')}"></div></div>
+    <div class="campo"><label for="aj-max">Avisar si pasan más de estos días sin conteo</label><input id="aj-max" type="number" inputmode="numeric" min="1" max="99" data-clave="inv_conteo_max_dias" value="${esc(aj.inv_conteo_max_dias ?? 10)}"></div>
     <div class="campo"><label for="aj-tol">Tolerancia de insumos (%)</label><input id="aj-tol" type="number" inputmode="numeric" min="0" max="99" data-clave="inv_tolerancia_insumos" value="${esc(aj.inv_tolerancia_insumos ?? 20)}"></div>
     <button class="btn" type="submit">Guardar</button></form>`;
 }

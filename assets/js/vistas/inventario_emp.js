@@ -1,5 +1,6 @@
 // Pestaña Inventario del empleado: recibir pedidos (con foto del ticket), conteo a ciegas y descuadres que le mandó gerencia.
 import * as api from '../api.js';
+import { estiloCategoria, miniArticulo, hidratarFotosArticulos } from '../categorias.js';
 import { esc, $, $$, aviso, ventana, confirmar, conOcupado, fechaCorta, fechaHora, comprimirEvidencia, cantidad, pesos, plural } from '../ui.js';
 
 const ERR = {
@@ -95,21 +96,23 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     const pintarItems = () => {
       lista.innerHTML = ped.items.length ? ped.items.map((it, i) => {
         const a = it.articulo;
-        return `<div class="fila inv item-ped" data-i="${i}"><div class="fila-txt"><b>${esc(a ? a.nombre : it.nombre_nuevo + ' (nuevo)')}</b>
+        return `<div class="fila inv item-ped" data-i="${i}">${a ? miniArticulo(a, 38) : ''}<div class="fila-txt"><b>${esc(a ? a.nombre : it.nombre_nuevo + ' (nuevo)')}</b>
           ${a && tieneEmpaque(a) ? `<span>1 ${esc(a.empaque_nombre)} = ${esc(cantidad(a.empaque_factor))} ${esc(unidadTxt(a, a.empaque_factor))}</span>` : ''}</div>
           <div class="cant-ped"><input type="number" inputmode="decimal" min="0" step="any" value="${esc(it.cantidad ?? '')}" data-cant aria-label="Cantidad">
           ${a && tieneEmpaque(a) ? `<select data-modo aria-label="Unidad"><option value="1" ${it.en_empaques ? 'selected' : ''}>${esc(plural(a.empaque_nombre, 2))}</option><option value="0" ${!it.en_empaques ? 'selected' : ''}>${esc(unidadTxt(a, 2))}</option></select>`
             : `<span class="unidad">${esc(a ? unidadTxt(a, 2) : 'piezas')}</span>`}
           <button type="button" class="icono-btn" data-quitar aria-label="Quitar">✕</button></div></div>`;
       }).join('') : '<p class="ayuda">Busca y toca cada artículo que llegó.</p>';
+      hidratarFotosArticulos(lista, api);
     };
     pintarItems();
     $('#pe-buscar', el).addEventListener('input', (e) => {
       const q = e.target.value.trim().toLowerCase();
       if (q.length < 2) { sug.innerHTML = ''; return; }
       const res = est.catalogo.filter((a) => a.nombre.toLowerCase().includes(q)).slice(0, 8);
-      sug.innerHTML = res.length ? res.map((a) => `<button type="button" class="sug" data-art="${esc(a.id)}">${esc(a.nombre)}<small>${esc(a.categoria || '')}</small></button>`).join('')
+      sug.innerHTML = res.length ? res.map((a) => `<button type="button" class="sug" data-art="${esc(a.id)}">${miniArticulo(a, 36)}<span class="sug-txt">${esc(a.nombre)}<small>${esc(a.categoria || '')}</small></span></button>`).join('')
         : '<p class="ayuda">No está en la lista. Usa “Llegó algo que no está en la lista”.</p>';
+      hidratarFotosArticulos(sug, api);
     });
     el.addEventListener('click', (e) => {
       const s = e.target.closest('[data-art]');
@@ -198,25 +201,28 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     el.innerHTML = `<div class="enc-seccion"><h2>Conteo</h2><button type="button" class="enlace" data-volver>Salir</button></div>
       <p class="nota-aviso">Sin clientes y sin tickets abiertos. Cuenta lo que hay físicamente; no importa lo que diga el sistema.</p>
       <div class="conteo-barra"><input id="co-buscar" type="text" placeholder="Buscar artículo…" autocomplete="off"><b id="co-prog"></b></div>
-      ${cats.map((cat) => `<details class="cat-conteo" open><summary>${esc(cat)} <span data-cat-prog="${esc(cat)}"></span></summary><div class="lista">
+      <div class="cat-chips" role="navigation" aria-label="Categorías">${cats.map((cat) => { const e = estiloCategoria(cat); return `<button type="button" class="cat-chip" style="--cat:${e.color}" data-ir-cat="${esc(cat)}"><span>${e.emoji}</span>${esc(cat)}<i data-cat-prog="${esc(cat)}"></i></button>`; }).join('')}</div>
+      ${cats.map((cat) => { const e = estiloCategoria(cat); return `<section class="cat-conteo" style="--cat:${e.color}" data-cat="${esc(cat)}"><div class="cat-enc"><span class="cat-emoji">${e.emoji}</span><b>${esc(cat)}</b><i data-cat-prog="${esc(cat)}"></i></div><div class="lista">
         ${est.catalogo.filter((a) => (a.categoria || 'Sin categoría') === cat).map((a) => {
           const v = items[a.id];
           const emp = tieneEmpaque(a);
           return `<div class="fila inv art-conteo ${v ? 'contado' : ''}" data-a="${esc(a.id)}" data-nombre="${esc(a.nombre.toLowerCase())}">
+            ${miniArticulo(a, 46)}
             <div class="fila-txt"><b>${esc(a.nombre)}</b><span data-total>${v ? `✓ ${esc(cantidad(v.contado))} ${esc(unidadTxt(a, v.contado))}` : (emp ? `1 ${esc(a.empaque_nombre)} = ${esc(cantidad(a.empaque_factor))} ${esc(unidadTxt(a, a.empaque_factor))}` : '')}</span></div>
             <div class="cant-conteo">${emp ? `<label><input type="number" inputmode="decimal" min="0" step="any" data-emp value="${esc(v?.empaques ?? '')}"><small>${esc(plural(a.empaque_nombre, 2))}</small></label>` : ''}
               <label><input type="number" inputmode="decimal" min="0" step="any" data-suel value="${esc(v ? (v.sueltas ?? (emp ? '' : v.contado)) : '')}"><small>${esc(emp ? `${unidadTxt(a, 2)} sueltos` : unidadTxt(a, 2))}</small></label></div></div>`;
-        }).join('')}</div></details>`).join('')}
+        }).join('')}</div></section>`; }).join('')}
       <button type="button" class="btn grande" data-enviar-conteo>Enviar conteo</button>`;
     const prog = () => {
       $('#co-prog', el).textContent = `${contados()} / ${est.catalogo.length}`;
       for (const cat of cats) {
         const arts = est.catalogo.filter((a) => (a.categoria || 'Sin categoría') === cat);
-        const pc = $(`[data-cat-prog="${CSS.escape(cat)}"]`, el);
-        if (pc) pc.textContent = `${arts.filter((a) => items[a.id]).length}/${arts.length}`;
+        const n = arts.filter((a) => items[a.id]).length;
+        $$(`[data-cat-prog="${CSS.escape(cat)}"]`, el).forEach((pc) => { pc.textContent = `${n}/${arts.length}`; pc.closest('.cat-chip, .cat-enc')?.classList.toggle('completa', n === arts.length); });
       }
     };
     prog();
+    hidratarFotosArticulos(el, api);
     const timers = new Map();
     el.addEventListener('input', (e) => {
       if (e.target.id === 'co-buscar') {
@@ -246,6 +252,8 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     }
     el.addEventListener('click', async (e) => {
       if (e.target.closest('[data-volver]')) { vista = 'inicio'; return cargar(); }
+      const ic = e.target.closest('[data-ir-cat]');
+      if (ic) { const sec = $(`section[data-cat="${CSS.escape(ic.dataset.irCat)}"]`, el); if (sec) window.scrollTo({ top: sec.getBoundingClientRect().top + window.scrollY - 130, behavior: 'smooth' }); return; }
       const b = e.target.closest('[data-enviar-conteo]');
       if (!b) return;
       for (const [id, t] of timers) { clearTimeout(t); timers.delete(id); await guardar($(`.art-conteo[data-a="${id}"]`, el)); }
