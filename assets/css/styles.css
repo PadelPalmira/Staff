@@ -314,3 +314,17 @@ input[type=number]:focus,input[type=time]:focus,input[type=date]:focus{border-co
 .aviso-fila .fila-txt{cursor:pointer}
 .aviso-fila .fila-txt span{white-space:normal}
 .aviso-fila .fila-txt b,#en-vivo .fila-txt span{white-space:normal}
+/* ---------- 0.5: semana, segmentos, vista previa ---------- */
+.segmentos{display:grid;grid-template-columns:1fr 1fr;gap:4px;padding:4px;background:var(--surface);border:1px solid var(--border);border-radius:14px;margin:6px 0 14px}
+.segmentos button{min-height:40px;border:0;border-radius:10px;background:none;color:var(--text-2);font:600 14px var(--font);cursor:pointer}
+.segmentos button[aria-selected="true"]{background:var(--surface-3);color:var(--text)}
+.semana-nav{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.semana-nav b{font-size:15px;text-align:center}
+.semana-nav .icono-btn:disabled{opacity:.3}
+.emp-semana .cifras b{font-size:20px}
+.emp-semana .cifras span i{font-style:normal;font-size:10.5px}
+.dias-semana{margin-top:10px;gap:6px}
+.fila.dia{padding:10px 12px;background:var(--surface-2)}
+.fila.dia .fila-txt span{white-space:normal}
+img.evidencia.previa{max-height:55vh;object-fit:contain;margin:0 auto 6px;background:#000}
+.emp-semana .enc-avisos h2{color:var(--text)}

@@ -3,7 +3,7 @@ import * as api from '../api.js';
 import { esc, $, $$, aviso, ventana, conOcupado, horaCorta, fechaHora, duracionTexto } from '../ui.js';
 
 const TZ = 'America/Mexico_City';
-const COLS_TURNO = 'id,fecha,tipo,perfil_nombre,estado,inicio_prog,fin_prog,abierto_en,cerrado_en,tarde_min,abierto_con_aviso,resumen';
+const COLS_TURNO = 'id,fecha,tipo,perfil_nombre,estado,inicio_prog,fin_prog,abierto_en,cerrado_en,tarde_min,abierto_con_aviso,cierre_auto,resumen';
 const COLS_TAREA = 'id,turno_id,nombre,momento,orden,limite,requiere_foto,estado,marcada_en,a_tiempo,foto_path,razon,excusa_motivo,etiqueta_no_aplica';
 const ERR = { sin_permiso: 'No tienes permiso para esto.', no_pendiente: 'Esa tarea ya no está pendiente.', no_excusada: 'Esa tarea no estaba excusada.', no_existe: 'Ya no existe.' };
 
@@ -57,7 +57,8 @@ export async function verTurno(id, yo, alCambiar) {
     let h = `<div class="detalle-cab"><h3>${esc(t.perfil_nombre)}</h3><p class="sub cap">${esc(fechaLarga(t.fecha))} · turno ${esc(nombreTipo(t.tipo))}</p></div>
       <dl class="datos"><dt>Horario</dt><dd>${esc(horaCorta(t.inicio_prog))} – ${esc(horaCorta(t.fin_prog))}</dd>
         <dt>Abrió</dt><dd>${esc(horaCorta(t.abierto_en))}${t.tarde_min > 0 ? ` (${t.tarde_min} min tarde)` : ''}${t.abierto_con_aviso ? ' · con aviso' : ''}</dd>
-        <dt>Cerró</dt><dd>${t.cerrado_en ? `${esc(horaCorta(t.cerrado_en))} · duró ${esc(duracionTexto(r.duracion_min))}${r.cerro_antes_min > 0 ? ` · ${r.cerro_antes_min} min antes` : ''}` : 'Sigue abierto'}</dd></dl>`;
+        <dt>Cerró</dt><dd>${t.cierre_auto ? `<span class="mal-txt">No cerró · cierre automático ${esc(fechaHora(t.cerrado_en))}</span>`
+          : t.cerrado_en ? `${esc(horaCorta(t.cerrado_en))} · duró ${esc(duracionTexto(r.duracion_min))}${r.cerro_antes_min > 0 ? ` · ${r.cerro_antes_min} min antes` : ''}` : 'Sigue abierto'}</dd></dl>`;
     for (const [mom, titulo] of [['apertura', 'Al abrir'], ['semanal', 'Semanales'], ['cierre', 'Al cerrar']]) {
       const l = tareas.filter((x) => x.momento === mom);
       if (!l.length) continue;
@@ -118,7 +119,23 @@ export async function verTurno(id, yo, alCambiar) {
 
 // ---------- pestaña Turnos ----------
 export async function montarTurnos(el, ctx, yo) {
-  el.innerHTML = `<div class="enc-seccion"><h2>Turnos</h2></div><p class="sub">Los últimos 30 días. Toca un turno para ver sus tareas, fotos y excusar lo que haga falta.</p>
+  let vista = api.leerLocal('ppstaff-turnos-vista') || 'semana';
+  el.innerHTML = `<div class="enc-seccion"><h2>Turnos</h2></div>
+    <div class="segmentos" role="tablist"><button type="button" data-vista="semana">Semana</button><button type="button" data-vista="historial">Historial</button></div>
+    <div id="vista-turnos"></div>`;
+  const cont = $('#vista-turnos', el);
+  function poner(v) {
+    vista = v; api.guardarLocal('ppstaff-turnos-vista', v);
+    $$('[data-vista]', el).forEach((b) => b.setAttribute('aria-selected', String(b.dataset.vista === v)));
+    cont.onclick = null;
+    if (v === 'semana') montarSemana(cont, yo); else montarHistorial(cont, yo);
+  }
+  $('.segmentos', el).addEventListener('click', (e) => { const b = e.target.closest('[data-vista]'); if (b) poner(b.dataset.vista); });
+  poner(vista);
+}
+
+async function montarHistorial(el, yo) {
+  el.innerHTML = `<p class="sub">Los últimos 30 días. Toca un turno para ver sus tareas, fotos y excusar lo que haga falta.</p>
     <div id="lista-turnos" class="lista"><p class="cargando">Cargando…</p></div>`;
   const lista = $('#lista-turnos', el);
   async function cargar() {
@@ -132,14 +149,72 @@ export async function montarTurnos(el, ctx, yo) {
         const cab = t.fecha !== ultimo ? `<h3 class="sub-titulo cap">${esc(fechaLarga(t.fecha))}</h3>` : '';
         ultimo = t.fecha;
         const insignia = t.estado === 'abierto' ? '<span class="insignia">Abierto</span>'
+          : t.cierre_auto ? '<span class="insignia mal">Cierre automático</span>'
           : r.sin_hacer ? `<span class="insignia mal">${r.sin_hacer} sin hacer</span>`
           : r.no_se_pudo ? `<span class="insignia aviso-i">${r.no_se_pudo} no se pudo</span>` : '<span class="insignia">Completo</span>';
         return `${cab}<button type="button" class="fila" data-turno="${esc(t.id)}"><div class="fila-txt"><b>${esc(t.perfil_nombre)} · ${esc(nombreTipo(t.tipo))}</b>
-          <span>${esc(horaCorta(t.abierto_en))}${t.cerrado_en ? ` – ${esc(horaCorta(t.cerrado_en))}` : ' · sigue abierto'}${t.tarde_min > 0 ? ` · ${t.tarde_min} min tarde` : ''}</span></div>${insignia}</button>`;
+          <span>${esc(horaCorta(t.abierto_en))}${t.cierre_auto ? ' · no cerró' : t.cerrado_en ? ` – ${esc(horaCorta(t.cerrado_en))}` : ' · sigue abierto'}${t.tarde_min > 0 ? ` · ${t.tarde_min} min tarde` : ''}</span></div>${insignia}</button>`;
       }).join('');
     } catch (e) { lista.innerHTML = `<div class="tarjeta vacio"><p>${esc(e.message)}</p></div>`; }
   }
   lista.addEventListener('click', (e) => { const b = e.target.closest('[data-turno]'); if (b) verTurno(b.dataset.turno, yo, cargar); });
+  cargar();
+}
+
+// ---------- resumen semanal ----------
+const lunesDe = (iso) => { const d = new Date(`${iso}T12:00:00Z`); const w = (d.getUTCDay() + 6) % 7; d.setUTCDate(d.getUTCDate() - w); return d.toISOString().slice(0, 10); };
+const sumarDias = (iso, n) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const diaCorto = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', timeZone: 'UTC' });
+const fechaMes = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('es-MX', { day: 'numeric', month: 'long', timeZone: 'UTC' });
+function cumplimiento(t) {
+  if (!t || !t.total) return null;
+  return Math.round((((t.a_tiempo || 0) + (t.no_aplica || 0) + (t.excusadas || 0)) / t.total) * 100);
+}
+
+async function montarSemana(el, yo) {
+  let desde = lunesDe(hoyMx());
+  el.innerHTML = `<div class="semana-nav"><button type="button" class="icono-btn" data-sem="-1" aria-label="Semana anterior">‹</button>
+    <b id="sem-titulo"></b><button type="button" class="icono-btn" data-sem="1" aria-label="Semana siguiente">›</button></div>
+    <div id="sem-cont"><p class="cargando">Cargando…</p></div>`;
+  const cont = $('#sem-cont', el);
+  async function cargar() {
+    const esta = desde === lunesDe(hoyMx());
+    $('#sem-titulo', el).textContent = `${esta ? 'Esta semana · ' : ''}${fechaMes(desde)} al ${fechaMes(sumarDias(desde, 6))}`;
+    $('[data-sem="1"]', el).disabled = esta;
+    cont.innerHTML = '<p class="cargando">Cargando…</p>';
+    let r;
+    try { r = await api.rpc('resumen_semanal', { p_desde: desde }); } catch (e) { cont.innerHTML = `<div class="tarjeta vacio"><p>${esc(e.message)}</p></div>`; return; }
+    if (!r.ok) { cont.innerHTML = '<div class="tarjeta vacio"><p>No tienes permiso para ver esto.</p></div>'; return; }
+    const emps = r.semana.empleados || [];
+    const ant = new Map((r.anterior.empleados || []).map((e) => [e.perfil_id, e]));
+    if (!emps.length) { cont.innerHTML = '<div class="tarjeta vacio"><p><b>No hubo turnos esta semana.</b></p></div>'; return; }
+    const tol = r.semana.tolerancia;
+    cont.innerHTML = `<p class="ayuda">Cumplimiento = tareas a tiempo + “no aplica” + excusadas. Llegó tarde = abrió más de ${tol} min después de su hora.</p>` + emps.map((e) => {
+      const t = e.tareas || {};
+      const pct = cumplimiento(t), pa = cumplimiento(ant.get(e.perfil_id)?.tareas);
+      const delta = pct != null && pa != null ? pct - pa : null;
+      const color = pct == null ? '' : pct >= 90 ? 'ok-txt' : pct >= 75 ? 'warn-txt' : 'mal-txt';
+      const fuera = (e.fuera_horario || 0) + (e.cierres_tarde || 0);
+      return `<section class="tarjeta emp-semana"><div class="enc-avisos"><h2>${esc(e.nombre)}</h2><span class="sub">${e.turnos} turno${e.turnos === 1 ? '' : 's'}</span></div>
+        <div class="cifras">
+          <div><b class="${color}">${pct == null ? '—' : pct + '%'}</b><span>Cumplimiento${delta != null && delta !== 0 ? `<br><i class="${delta > 0 ? 'ok-txt' : 'mal-txt'}">${delta > 0 ? '▲' : '▼'} ${Math.abs(delta)} vs anterior</i>` : ''}</span></div>
+          <div><b class="${e.tarde_turnos ? 'mal-txt' : ''}">${e.tarde_turnos}/${e.turnos}</b><span>Llegó tarde${e.tarde_turnos ? `<br><i>${e.tarde_min_total} min</i>` : ''}</span></div>
+          <div><b class="${t.pendientes ? 'mal-txt' : ''}">${t.pendientes || 0}</b><span>Sin hacer</span></div>
+          <div><b class="${t.no_se_pudo ? 'warn-txt' : ''}">${t.no_se_pudo || 0}</b><span>No se pudo</span></div>
+        </div>
+        <p class="detalle">${t.a_tiempo || 0} a tiempo · ${t.tarde || 0} fuera de tiempo · ${t.excusadas || 0} excusadas${e.cierres_auto ? ` · <span class="mal-txt">${e.cierres_auto} sin cerrar (cierre automático)</span>` : ''}${fuera ? ` · <span class="warn-txt">${fuera} fuera de horario</span>` : ''}</p>
+        <div class="lista dias-semana">${(e.dias || []).map((d) => `<button type="button" class="fila dia" data-turno="${esc(d.turno_id)}">
+          <div class="fila-txt"><b class="cap">${esc(diaCorto(d.fecha))} · ${esc(d.tipo_nombre)}</b>
+          <span>Abrió <b class="${d.tarde_min > tol ? 'mal-txt' : 'ok-txt'}">${esc(horaCorta(d.abierto_en))}</b> (entrada ${esc(horaCorta(d.inicio_prog))}${d.tarde_min > 0 ? `, +${d.tarde_min} min` : ''})
+          · ${d.cierre_auto ? '<span class="mal-txt">no cerró</span>' : d.cerrado_en ? `cerró ${esc(horaCorta(d.cerrado_en))}` : 'sigue abierto'}</span></div></button>`).join('')}</div></section>`;
+    }).join('');
+  }
+  el.onclick = (e) => {
+    const n = e.target.closest('[data-sem]');
+    if (n) { desde = sumarDias(desde, Number(n.dataset.sem) * 7); return cargar(); }
+    const d = e.target.closest('[data-turno]');
+    if (d) verTurno(d.dataset.turno, yo, cargar);
+  };
   cargar();
 }
 

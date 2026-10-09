@@ -14,6 +14,8 @@ export async function montarAjustes(el) {
     <div class="enc-seccion" style="margin-top:22px"><h3 class="sub-titulo" style="margin:0">Días cerrados</h3><button type="button" class="btn chico" data-nuevo-dia>＋ Agregar</button></div>
     <p class="ayuda">En un día cerrado (feriado, mantenimiento…) la app avisa al empleado antes de abrir turno. No bloquea nada.</p>
     <div id="aj-dias" class="lista"></div>
+    <h3 class="sub-titulo">Alertas automáticas</h3>
+    <form class="tarjeta formulario" id="aj-alertas" novalidate><p class="cargando">Cargando…</p></form>
     <h3 class="sub-titulo">Correos</h3>
     <section class="tarjeta"><p class="detalle" style="margin-top:0">Las invitaciones y avisos se mandan desde Gmail. Manda una prueba a tu correo para confirmar que funciona.</p>
       <button type="button" class="btn ghost" data-probar-correo>Enviar correo de prueba</button></section>`;
@@ -67,6 +69,47 @@ export async function montarAjustes(el) {
       });
     });
   }
+
+  // ---------- alertas ----------
+  const CAMPOS = [
+    ['tolerancia_apertura_min', 'Tolerancia para abrir turno', 'minutos después de la hora de entrada; después avisa "nadie ha abierto" y cuenta como llegada tarde', 'number'],
+    ['aviso_sin_cerrar_min', 'Aviso de turno sin cerrar', 'minutos después de la hora de salida (correo al empleado y a gerencia)', 'number'],
+    ['aviso_cierre_auto_horas', 'Aviso "se cerrará automáticamente"', 'horas después de la salida (correo al empleado)', 'number'],
+    ['cierre_auto_hora', 'Hora del cierre automático', 'del día siguiente; las tareas pendientes quedan sin hacer y se avisa a gerencia', 'time'],
+    ['margen_fuera_horario_min', 'Margen de "fuera de horario"', 'minutos; tareas marcadas o turno cerrado después de la salida + este margen avisan a gerencia', 'number'],
+    ['resumen_semanal_hora', 'Correo del resumen semanal', 'hora de los lunes', 'time'],
+    ['inactividad_minutos', 'Cerrar usuario por inactividad', 'minutos sin usar el celular del club', 'number'],
+  ];
+  const fAl = $('#aj-alertas', el);
+  let valores = {};
+  async function cargarAlertas() {
+    try {
+      const filas = await api.seleccionar('ajustes', 'select=clave,valor');
+      valores = Object.fromEntries(filas.map((f) => [f.clave, f.valor]));
+    } catch (e) { fAl.innerHTML = `<p class="detalle">${esc(e.message)}</p>`; return; }
+    fAl.innerHTML = `<label class="interruptor"><input type="checkbox" id="al-activas" ${valores.alertas_activas !== false ? 'checked' : ''}>
+        <span><b>Alertas activas</b> — si las apagas, no se manda ningún aviso automático ni se cierran turnos solos.</span></label>
+      ${CAMPOS.map(([k, t, ayuda, tipo]) => `<div class="campo"><label for="al-${k}">${t}</label>
+        <input id="al-${k}" data-clave="${k}" type="${tipo}" ${tipo === 'number' ? 'inputmode="numeric" min="0"' : ''} value="${esc(valores[k] ?? '')}">
+        <p class="ayuda">${ayuda}</p></div>`).join('')}
+      <button class="btn" type="submit">Guardar alertas</button>`;
+  }
+  fAl.addEventListener('submit', (e) => {
+    e.preventDefault();
+    conOcupado($('button[type=submit]', fAl), async () => {
+      const cambios = [];
+      const act = $('#al-activas', fAl).checked;
+      if (act !== (valores.alertas_activas !== false)) cambios.push(['alertas_activas', String(act)]);
+      $$('[data-clave]', fAl).forEach((i) => { if (String(i.value) !== String(valores[i.dataset.clave] ?? '')) cambios.push([i.dataset.clave, i.value]); });
+      if (!cambios.length) return aviso('No hay cambios.', 'info');
+      for (const [k, v] of cambios) {
+        const r = await api.rpc('ajuste_guardar', { p_clave: k, p_valor: v });
+        if (!r.ok) return aviso(`Revisa "${(CAMPOS.find((c) => c[0] === k) || [k, 'Alertas activas'])[1]}": valor no válido.`, 'error');
+      }
+      aviso('Alertas guardadas.', 'ok'); cargarAlertas();
+    });
+  });
+  cargarAlertas();
 
   cTurnos.addEventListener('click', (e) => { const b = e.target.closest('[data-clave]'); if (b) editarTurno(tipos.find((t) => t.clave === b.dataset.clave)); });
   $('[data-nuevo-dia]', el).addEventListener('click', nuevoDia);

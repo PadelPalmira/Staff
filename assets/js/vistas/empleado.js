@@ -188,18 +188,30 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     inp.addEventListener('change', async () => {
       const f = inp.files?.[0];
       if (!f) return;
-      fila.classList.add('subiendo');
-      try {
-        const blob = await comprimirEvidencia(f);
-        const ruta = `turnos/${est.mio.id}/${x.id}.jpg`;
-        await api.subirFoto(ruta, blob, 'evidencias');
-        await marcar(x.id, 'hecha', { p_foto: ruta });
-      } catch (e) {
-        aviso(e.codigo === 'sin_conexion' ? ERR.sin_conexion : `No se pudo subir la foto (${e.message || 'error'}). Intenta de nuevo.`, 'error', 7000);
-        fila.classList.remove('subiendo');
-      }
+      let blob;
+      try { blob = await comprimirEvidencia(f); } catch { aviso('No se pudo leer la foto. Intenta de nuevo.', 'error'); return; }
+      vistaPrevia(x, fila, blob);
     });
     inp.click();
+  }
+  // Miniatura antes de subir: usarla, tomar otra o cancelar
+  function vistaPrevia(x, fila, blob) {
+    const url = URL.createObjectURL(blob);
+    const v = ventana(`<img class="evidencia grande previa" src="${url}" alt="Vista previa de la foto">
+      <p class="detalle">¿Se ve bien? Revisa que se note la tarea terminada antes de usarla.</p>
+      <div class="acciones" style="margin-top:12px"><button type="button" class="btn grande" data-usar>Usar esta foto</button>
+        <div class="fila-botones" style="margin-top:0"><button type="button" class="btn ghost" data-otra>Tomar otra</button>
+        <button type="button" class="btn ghost" data-cerrar>Cancelar</button></div></div>`, { titulo: x.nombre, alCerrar: () => URL.revokeObjectURL(url) });
+    $('[data-otra]', v.el).addEventListener('click', () => { v.cerrar(); pedirFoto(x, fila); });
+    $('[data-usar]', v.el).addEventListener('click', (e) => conOcupado(e.currentTarget, async () => {
+      try {
+        const ruta = `turnos/${est.mio.id}/${x.id}.jpg`;
+        await api.subirFoto(ruta, blob, 'evidencias');
+        if (await marcar(x.id, 'hecha', { p_foto: ruta })) { v.cerrar(); aviso('Foto guardada y tarea marcada.', 'ok'); }
+      } catch (err) {
+        aviso(err.codigo === 'sin_conexion' ? ERR.sin_conexion : `No se pudo subir la foto (${err.message || 'error'}). Intenta de nuevo.`, 'error', 7000);
+      }
+    }));
   }
   function ventanaNoPuedo(x) {
     const v = ventana(`<form class="formulario" novalidate><p class="detalle">Escribe por qué no se pudo hacer <b>${esc(x.nombre)}</b>. La tarea queda marcada como “No se pudo” y se avisa a gerencia y administración.</p>
