@@ -4,7 +4,7 @@ import { esc, $, $$, aviso, ventana, conOcupado, horaCorta, fechaHora, duracionT
 
 const TZ = 'America/Mexico_City';
 const COLS_TURNO = 'id,fecha,tipo,perfil_nombre,estado,inicio_prog,fin_prog,abierto_en,cerrado_en,tarde_min,abierto_con_aviso,resumen';
-const COLS_TAREA = 'id,turno_id,nombre,momento,orden,limite,requiere_foto,estado,marcada_en,a_tiempo,foto_path,razon,pide_excusa,excusa_motivo,etiqueta_no_aplica';
+const COLS_TAREA = 'id,turno_id,nombre,momento,orden,limite,requiere_foto,estado,marcada_en,a_tiempo,foto_path,razon,excusa_motivo,etiqueta_no_aplica';
 const ERR = { sin_permiso: 'No tienes permiso para esto.', no_pendiente: 'Esa tarea ya no está pendiente.', no_excusada: 'Esa tarea no estaba excusada.', no_existe: 'Ya no existe.' };
 
 export const hoyMx = () => new Date().toLocaleDateString('en-CA', { timeZone: TZ });
@@ -19,23 +19,23 @@ export async function pintarEnVivo(el) {
     const hoy = hoyMx();
     const turnos = await api.seleccionar('turnos', `select=${COLS_TURNO}&or=(estado.eq.abierto,fecha.eq.${hoy})&order=abierto_en.desc&limit=10`);
     const ids = turnos.filter((t) => t.estado === 'abierto').map((t) => t.id);
-    const tareas = ids.length ? await api.seleccionar('turno_tareas', `select=turno_id,estado,limite,pide_excusa&turno_id=in.(${ids.join(',')})`) : [];
+    const tareas = ids.length ? await api.seleccionar('turno_tareas', `select=turno_id,estado,limite&turno_id=in.(${ids.join(',')})`) : [];
     if (!turnos.length) { el.innerHTML = '<p class="detalle">Hoy todavía nadie ha abierto turno.</p>'; return; }
     const ahora = Date.now();
     el.innerHTML = turnos.map((t) => {
       if (t.estado === 'cerrado') {
         const r = t.resumen || {};
         return `<button type="button" class="fila" data-turno="${esc(t.id)}"><div class="fila-txt"><b>${esc(t.perfil_nombre)} · ${esc(nombreTipo(t.tipo))}</b>
-          <span>Cerrado a las ${esc(horaCorta(t.cerrado_en))} · ${r.sin_hacer ? `${r.sin_hacer} sin hacer` : 'todo cumplido'}</span></div>
+          <span>Cerrado a las ${esc(horaCorta(t.cerrado_en))} · ${r.sin_hacer ? `${r.sin_hacer} sin hacer` : 'todo cumplido'}${r.no_se_pudo ? ` · ${r.no_se_pudo} no se pudo` : ''}</span></div>
           <span class="insignia ${r.sin_hacer ? 'aviso-i' : ''}">Cerrado</span></button>`;
       }
       const l = tareas.filter((x) => x.turno_id === t.id);
       const ok = l.filter((x) => x.estado !== 'pendiente').length;
       const venc = l.filter((x) => x.estado === 'pendiente' && x.limite && new Date(x.limite) < ahora).length;
-      const excusas = l.filter((x) => x.estado === 'pendiente' && x.pide_excusa).length;
+      const nsp = l.filter((x) => x.estado === 'no_se_pudo').length;
       const pct = l.length ? Math.round((ok / l.length) * 100) : 100;
       return `<button type="button" class="fila vivo" data-turno="${esc(t.id)}"><div class="fila-txt"><b>${esc(t.perfil_nombre)} · ${esc(nombreTipo(t.tipo))}</b>
-        <span>Abierto a las ${esc(horaCorta(t.abierto_en))} · ${ok}/${l.length} tareas${venc ? ` · ${venc} vencida${venc === 1 ? '' : 's'}` : ''}${excusas ? ` · ${excusas} piden excusa` : ''}</span>
+        <span>Abierto a las ${esc(horaCorta(t.abierto_en))} · ${ok}/${l.length} tareas${venc ? ` · ${venc} vencida${venc === 1 ? '' : 's'}` : ''}${nsp ? ` · ${nsp} no se pudo` : ''}</span>
         <div class="progreso chico"><span style="width:${pct}%"></span></div></div>
         <span class="insignia ${venc ? 'mal' : ''}">${venc ? 'Atrasado' : 'Abierto'}</span></button>`;
     }).join('');
@@ -66,13 +66,15 @@ export async function verTurno(id, yo, alCambiar) {
         let est;
         if (x.estado === 'hecha') est = `<span class="${x.a_tiempo ? 'ok-txt' : 'warn-txt'}">✓ ${esc(horaCorta(x.marcada_en))} · ${x.a_tiempo ? 'a tiempo' : 'fuera de tiempo'}</span>`;
         else if (x.estado === 'no_aplica') est = `<span class="ok-txt">${esc(x.etiqueta_no_aplica || 'No aplica')}</span>`;
+        else if (x.estado === 'no_se_pudo') est = `<span class="warn-txt">⚠ No se pudo · ${esc(horaCorta(x.marcada_en))}</span>`;
         else if (x.estado === 'excusada') est = `<span class="ok-txt">Excusada${x.excusa_motivo ? `: ${esc(x.excusa_motivo)}` : ''}</span>`;
         else est = `<span class="${venc || t.estado === 'cerrado' ? 'mal-txt' : ''}">${t.estado === 'cerrado' ? 'Sin hacer' : venc ? `Venció a las ${esc(horaCorta(x.limite))}` : x.limite ? `Antes de las ${esc(horaCorta(x.limite))}` : 'Pendiente'}</span>`;
-        const puedeExcusar = x.estado === 'pendiente';
-        return `<div class="tarea ${x.estado === 'hecha' || x.estado === 'no_aplica' || x.estado === 'excusada' ? 'lista' : ''} ${venc ? 'vencida' : ''}" data-id="${esc(x.id)}">
-          <div class="tarea-check ro">${x.estado === 'pendiente' ? '' : '✓'}</div>
+        const puedeExcusar = x.estado === 'pendiente' || x.estado === 'no_se_pudo';
+        const nsp = x.estado === 'no_se_pudo';
+        return `<div class="tarea ${x.estado !== 'pendiente' ? 'lista' : ''} ${nsp ? 'nosepudo' : ''} ${venc ? 'vencida' : ''}" data-id="${esc(x.id)}">
+          <div class="tarea-check ro">${x.estado === 'pendiente' ? '' : nsp ? '!' : '✓'}</div>
           <div class="tarea-txt"><b>${esc(x.nombre)}</b><span class="tarea-meta">${est}</span>
-            ${x.razon ? `<span class="tarea-meta">Razón: ${esc(x.razon)}${x.pide_excusa ? ' · <b class="warn-txt">pide excusa</b>' : ''}</span>` : ''}
+            ${x.razon ? `<span class="tarea-meta">Razón: ${esc(x.razon)}</span>` : ''}
             ${x.foto_path ? `<img class="evidencia" data-foto="${esc(x.foto_path)}" alt="Evidencia de ${esc(x.nombre)}" hidden>` : ''}
             <span class="tarea-botones">${puedeExcusar ? '<button type="button" class="chip" data-excusar>Excusar</button>' : ''}${x.estado === 'excusada' ? '<button type="button" class="chip" data-quitar-excusa>Quitar excusa</button>' : ''}</span>
           </div></div>`;
@@ -90,7 +92,7 @@ export async function verTurno(id, yo, alCambiar) {
     if (!fila) return;
     const idT = fila.dataset.id;
     if (e.target.closest('[data-excusar]')) {
-      const f = ventana(`<form class="formulario" novalidate><p class="detalle">La tarea dejará de contar como pendiente. Puedes anotar un motivo.</p>
+      const f = ventana(`<form class="formulario" novalidate><p class="detalle">La tarea cuenta como cumplida (no le afecta al empleado). Puedes anotar un motivo.</p>
         <div class="campo"><label for="ex-m">Motivo <span class="opc">(opcional)</span></label><input id="ex-m" type="text" placeholder="Ej. se descompuso, se repone mañana"></div>
         <button class="btn" type="submit">Excusar tarea</button></form>`, { titulo: 'Excusar tarea' });
       const form = $('form', f.el);
@@ -129,7 +131,9 @@ export async function montarTurnos(el, ctx, yo) {
         const r = t.resumen || {};
         const cab = t.fecha !== ultimo ? `<h3 class="sub-titulo cap">${esc(fechaLarga(t.fecha))}</h3>` : '';
         ultimo = t.fecha;
-        const insignia = t.estado === 'abierto' ? '<span class="insignia">Abierto</span>' : `<span class="insignia ${r.sin_hacer ? 'aviso-i' : ''}">${r.sin_hacer ? `${r.sin_hacer} sin hacer` : 'Completo'}</span>`;
+        const insignia = t.estado === 'abierto' ? '<span class="insignia">Abierto</span>'
+          : r.sin_hacer ? `<span class="insignia mal">${r.sin_hacer} sin hacer</span>`
+          : r.no_se_pudo ? `<span class="insignia aviso-i">${r.no_se_pudo} no se pudo</span>` : '<span class="insignia">Completo</span>';
         return `${cab}<button type="button" class="fila" data-turno="${esc(t.id)}"><div class="fila-txt"><b>${esc(t.perfil_nombre)} · ${esc(nombreTipo(t.tipo))}</b>
           <span>${esc(horaCorta(t.abierto_en))}${t.cerrado_en ? ` – ${esc(horaCorta(t.cerrado_en))}` : ' · sigue abierto'}${t.tarde_min > 0 ? ` · ${t.tarde_min} min tarde` : ''}</span></div>${insignia}</button>`;
       }).join('');
@@ -137,4 +141,29 @@ export async function montarTurnos(el, ctx, yo) {
   }
   lista.addEventListener('click', (e) => { const b = e.target.closest('[data-turno]'); if (b) verTurno(b.dataset.turno, yo, cargar); });
   cargar();
+}
+
+// ---------- avisos para gerencia y admin ----------
+export async function contarAvisos() {
+  const l = await api.seleccionar('notificaciones', 'select=id&vista=eq.false&anulada=eq.false&limit=50');
+  return l.length;
+}
+export async function pintarAvisos(el, yo, alCambiar) {
+  let l;
+  try { l = await api.seleccionar('notificaciones', 'select=id,creada_en,titulo,detalle,perfil_nombre,turno_id&vista=eq.false&anulada=eq.false&order=creada_en.desc&limit=30'); }
+  catch { return; }
+  el.hidden = !l.length;
+  if (!l.length) { el.innerHTML = ''; return; }
+  el.innerHTML = `<div class="enc-avisos"><h2>⚠ Avisos (${l.length})</h2><button type="button" class="enlace" data-todo-visto>Marcar todo visto</button></div>
+    <div class="lista">${l.map((n) => `<div class="fila aviso-fila" data-n="${esc(n.id)}"><div class="fila-txt" data-ver-turno="${esc(n.turno_id || '')}">
+      <b>${esc(n.titulo)}</b><span>${esc(n.perfil_nombre || '')} · ${esc(fechaHora(n.creada_en))}${n.detalle ? ` · “${esc(n.detalle)}”` : ''}</span></div>
+      <button type="button" class="btn chico ghost" data-visto>Visto</button></div>`).join('')}</div>`;
+  el.onclick = async (e) => {
+    const todo = e.target.closest('[data-todo-visto]');
+    const f = e.target.closest('[data-n]');
+    if (todo) { await api.rpc('notificacion_vista', { p_id: null }).catch(() => null); return alCambiar(); }
+    if (f && e.target.closest('[data-visto]')) { await api.rpc('notificacion_vista', { p_id: f.dataset.n }).catch(() => null); return alCambiar(); }
+    const vt = e.target.closest('[data-ver-turno]');
+    if (vt && vt.dataset.verTurno) verTurno(vt.dataset.verTurno, yo, alCambiar);
+  };
 }

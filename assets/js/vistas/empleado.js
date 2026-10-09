@@ -141,19 +141,20 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
   function metaTarea(x) {
     if (x.estado === 'excusada') return '<span class="ok-txt">Excusada por gerencia</span>';
     if (x.estado === 'hecha') return `<span class="${x.a_tiempo ? 'ok-txt' : 'warn-txt'}">✓ ${esc(horaCorta(x.marcada_en))} · ${x.a_tiempo ? 'a tiempo' : 'fuera de tiempo'}</span>${x.foto_path ? ' · 📷' : ''}`;
+    if (x.estado === 'no_se_pudo') return `<span class="warn-txt">⚠ No se pudo · ${esc(horaCorta(x.marcada_en))} · se avisó a gerencia</span>`;
     if (x.estado === 'no_aplica') return `<span class="ok-txt">${esc(x.etiqueta_no_aplica || 'No aplica hoy')} · ${esc(horaCorta(x.marcada_en))}</span>`;
     const partes = [];
     if (x.limite) partes.push(vencida(x) ? `<span class="mal-txt">Venció a las ${esc(horaCorta(x.limite))}</span>` : `Antes de las ${esc(horaCorta(x.limite))}`);
     if (x.requiere_foto) partes.push('📷 pide foto');
-    if (x.pide_excusa) partes.push('<span class="warn-txt">Pediste que se excuse</span>');
     return partes.join(' · ');
   }
   function filaTarea(x) {
     const listo = x.estado !== 'pendiente';
-    return `<div class="tarea ${listo ? 'lista' : ''} ${vencida(x) ? 'vencida' : ''} ${x.estado === 'excusada' ? 'excusada' : ''}" data-id="${esc(x.id)}">
-      <button type="button" class="tarea-check" data-a="${listo ? 'quitar' : 'marcar'}" aria-label="${listo ? 'Quitar marca' : 'Marcar como hecha'}" ${x.estado === 'excusada' ? 'disabled' : ''}>${listo ? '✓' : (x.requiere_foto ? '📷' : '')}</button>
+    const nsp = x.estado === 'no_se_pudo';
+    return `<div class="tarea ${listo ? 'lista' : ''} ${nsp ? 'nosepudo' : ''} ${vencida(x) ? 'vencida' : ''} ${x.estado === 'excusada' ? 'excusada' : ''}" data-id="${esc(x.id)}">
+      <button type="button" class="tarea-check" data-a="${listo ? 'quitar' : 'marcar'}" aria-label="${listo ? 'Quitar marca' : 'Marcar como hecha'}" ${x.estado === 'excusada' ? 'disabled' : ''}>${nsp ? '!' : listo ? '✓' : (x.requiere_foto ? '📷' : '')}</button>
       <div class="tarea-txt"><b>${esc(x.nombre)}</b><span class="tarea-meta">${metaTarea(x)}</span>
-        ${x.razon && x.estado === 'pendiente' ? `<span class="tarea-meta">Razón: ${esc(x.razon)}</span>` : ''}
+        ${x.razon && (x.estado === 'pendiente' || nsp) ? `<span class="tarea-meta">Razón: ${esc(x.razon)}</span>` : ''}
         ${!listo ? `<span class="tarea-botones">${x.condicional ? `<button type="button" class="chip" data-a="noaplica">${esc(x.etiqueta_no_aplica || 'No aplica hoy')}</button>` : ''}
           <button type="button" class="chip" data-a="nopuedo">No se puede</button></span>` : ''}</div></div>`;
   }
@@ -175,6 +176,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     const r = await llamar('tarea_marcar', { p_tarea_id: id, p_accion: accion, ...extra });
     if (muerto) return false;
     if (!r.ok) { aviso(msg(r), 'error'); if (r.error === 'turno_cerrado' || r.error === 'excusada') cargar({ silencioso: true }); return false; }
+    if (r.notificacion_id) api.avisar(r.notificacion_id);
     const i = est.mio.tareas.findIndex((x) => x.id === id);
     if (i >= 0) est.mio.tareas[i] = r.tarea;
     pintar();
@@ -193,20 +195,20 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
         await api.subirFoto(ruta, blob, 'evidencias');
         await marcar(x.id, 'hecha', { p_foto: ruta });
       } catch (e) {
-        aviso(e.codigo === 'sin_conexion' ? ERR.sin_conexion : 'No se pudo subir la foto. Intenta de nuevo.', 'error');
+        aviso(e.codigo === 'sin_conexion' ? ERR.sin_conexion : `No se pudo subir la foto (${e.message || 'error'}). Intenta de nuevo.`, 'error', 7000);
         fila.classList.remove('subiendo');
       }
     });
     inp.click();
   }
   function ventanaNoPuedo(x) {
-    const v = ventana(`<form class="formulario" novalidate><p class="detalle">Cuéntale a gerencia por qué no se pudo hacer <b>${esc(x.nombre)}</b>. Ellos deciden si la excusan; si no, cuenta como no cumplida.</p>
+    const v = ventana(`<form class="formulario" novalidate><p class="detalle">Escribe por qué no se pudo hacer <b>${esc(x.nombre)}</b>. La tarea queda marcada como “No se pudo” y se avisa a gerencia y administración.</p>
       <div class="campo"><label for="np-razon">Razón</label><textarea id="np-razon" rows="3" placeholder="Ej. se descompuso, no había material…"></textarea></div>
-      <button class="btn" type="submit">Enviar razón</button></form>`, { titulo: 'No se puede hacer' });
+      <button class="btn" type="submit">Marcar “No se pudo”</button></form>`, { titulo: 'No se puede hacer' });
     const form = $('form', v.el);
     form.addEventListener('submit', (e) => {
       e.preventDefault();
-      conOcupado($('button[type=submit]', form), async () => { if (await marcar(x.id, 'no_puedo', { p_razon: $('#np-razon', form).value })) { v.cerrar(); aviso('Razón enviada.', 'ok'); } });
+      conOcupado($('button[type=submit]', form), async () => { if (await marcar(x.id, 'no_puedo', { p_razon: $('#np-razon', form).value })) { v.cerrar(); aviso('Marcada como “No se pudo”. Se avisó a gerencia.', 'ok'); } });
     });
   }
 
@@ -247,7 +249,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
       <dl class="datos resumen">
         <dt>A tiempo</dt><dd>${r.hechas_a_tiempo || 0}</dd><dt>Fuera de tiempo</dt><dd>${r.hechas_tarde || 0}</dd>
         <dt>No aplicaban</dt><dd>${r.no_aplica || 0}</dd><dt>Excusadas</dt><dd>${r.excusadas || 0}</dd>
-        <dt>Sin hacer</dt><dd>${r.sin_hacer || 0}</dd>
+        <dt>No se pudo</dt><dd>${r.no_se_pudo || 0}</dd><dt>Sin hacer</dt><dd>${r.sin_hacer || 0}</dd>
         ${r.tarde_min > 0 ? `<dt>Abriste</dt><dd>${r.tarde_min} min después de tu hora</dd>` : ''}
         ${r.cerro_antes_min > 0 ? `<dt>Cerraste</dt><dd>${r.cerro_antes_min} min antes de tu hora</dd>` : ''}</dl>`;
   }
@@ -281,7 +283,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     if (a === 'noaplica') return conOcupado(b, () => marcar(x.id, 'no_aplica'));
     if (a === 'nopuedo') return ventanaNoPuedo(x);
     if (a === 'quitar') {
-      return confirmar({ titulo: 'Quitar marca', texto: `¿Quitar la marca de "${x.nombre}"?`, ok: 'Quitar marca' }).then((ok) => { if (ok) marcar(x.id, 'deshacer'); });
+      return confirmar({ titulo: 'Quitar marca', texto: `¿Quitar la marca de "${x.nombre}"? Vuelve a quedar pendiente.`, ok: 'Quitar marca' }).then((ok) => { if (ok) marcar(x.id, 'deshacer'); });
     }
   });
 

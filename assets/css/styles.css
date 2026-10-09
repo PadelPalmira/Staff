@@ -303,3 +303,14 @@ input[type=number]:focus,input[type=time]:focus,input[type=date]:focus{border-co
 .chip-sel input:focus-visible+span{box-shadow:0 0 0 3px rgba(0,242,234,.3)}
 .interruptor{display:flex;align-items:center;gap:12px;font-size:14.5px;cursor:pointer;text-align:left}
 .interruptor input{width:22px;height:22px;accent-color:var(--cyan);flex:none}
+/* ---------- "No se pudo" y avisos (0.4.1) ---------- */
+.tarea.nosepudo{opacity:1;border-color:rgba(251,191,36,.45);background:linear-gradient(0deg,rgba(251,191,36,.05),rgba(251,191,36,.05)),var(--surface)}
+.tarea.nosepudo .tarea-check{background:var(--warn-dim);border-color:var(--warn);color:var(--warn)}
+.punto-aviso.amarillo{background:var(--warn);color:#2a1d00}
+.tarjeta-avisos{border-color:rgba(251,191,36,.5);background:linear-gradient(135deg,rgba(251,191,36,.10),rgba(251,191,36,.03))}
+.enc-avisos{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px}
+.enc-avisos h2{color:var(--warn)}
+.aviso-fila{cursor:default}
+.aviso-fila .fila-txt{cursor:pointer}
+.aviso-fila .fila-txt span{white-space:normal}
+.aviso-fila .fila-txt b,#en-vivo .fila-txt span{white-space:normal}

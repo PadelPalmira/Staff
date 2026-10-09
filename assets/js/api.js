@@ -108,6 +108,14 @@ export async function funcion(accion, datos = {}, { conSesion = true } = {}) {
   try { return await res.json(); } catch { return { ok: false, error: 'error_interno', mensaje: 'La respuesta del servidor no se entendió.' }; }
 }
 
+// Aviso por correo a admin y gerencia (no bloquea: si falla, el aviso igual queda en la app)
+export async function avisar(notificacionId) {
+  try {
+    const t = await tokenVigente();
+    await pedir('/functions/v1/avisos', { metodo: 'POST', cuerpo: { notificacion_id: notificacionId }, token: t, crudo: true });
+  } catch { /* sin internet: el aviso queda en la app */ }
+}
+
 // ---------- fotos ----------
 const cacheFotos = new Map(); // "ruta|version" -> { url, vence }
 export async function urlsFotos(items, bucket = 'avatares') {

@@ -3,7 +3,7 @@ import * as api from '../api.js';
 import { APP_VERSION } from '../config.js';
 import { esc, $, $$, ROL, avatar, hidratarAvatares, aviso, conOcupado, primerNombre } from '../ui.js';
 import { montarUsuarios } from './usuarios.js';
-import { montarTurnos, pintarEnVivo, verTurno } from './turnos.js';
+import { montarTurnos, pintarEnVivo, verTurno, pintarAvisos, contarAvisos } from './turnos.js';
 import { montarTareasAdmin } from './tareas_admin.js';
 import { montarAjustes } from './ajustes.js';
 
@@ -24,7 +24,7 @@ export function montarPanel(raiz, ctx, yo) {
     </header>
     <main class="contenido" id="contenido"></main>
     <nav class="tabs" aria-label="Secciones">${tabs.map(([id, txt, ico]) =>
-      `<button type="button" data-tab="${id}" aria-current="${id === actual}"><span aria-hidden="true">${ico}</span>${txt}${id === 'usuarios' ? '<i class="punto-aviso" data-badge hidden></i>' : ''}</button>`).join('')}</nav>
+      `<button type="button" data-tab="${id}" aria-current="${id === actual}"><span aria-hidden="true">${ico}</span>${txt}${id === 'usuarios' ? '<i class="punto-aviso" data-badge hidden></i>' : ''}${id === 'inicio' ? '<i class="punto-aviso amarillo" data-badge-avisos hidden></i>' : ''}</button>`).join('')}</nav>
   </div>`;
   hidratarAvatares(raiz);
   $('[data-salir]', raiz).addEventListener('click', async () => { await api.salir(); api.guardarLocal(LLAVE_TAB, null); ctx.recargar(); });
@@ -61,6 +61,20 @@ export function montarPanel(raiz, ctx, yo) {
     ctx.alDesmontar(() => { clearInterval(reloj); document.removeEventListener('visibilitychange', revisarSolicitudes); document.removeEventListener('ppstaff-solicitudes', forzar); });
   }
 
+  // Avisos ("No se pudo", etc.): punto amarillo en Inicio, revisado cada 30 s
+  async function revisarAvisos() {
+    if (document.visibilityState !== 'visible') return;
+    try {
+      const n = await contarAvisos();
+      const b = $('[data-badge-avisos]', raiz);
+      if (b) { b.hidden = !n; b.textContent = n ? String(n) : ''; }
+    } catch { /* sin internet */ }
+  }
+  const relojAvisos = setInterval(revisarAvisos, 30000);
+  document.addEventListener('visibilitychange', revisarAvisos);
+  ctx.alDesmontar(() => { clearInterval(relojAvisos); document.removeEventListener('visibilitychange', revisarAvisos); });
+  revisarAvisos();
+
   function ir(id) {
     actual = id;
     api.guardarLocal(LLAVE_TAB, id);
@@ -79,13 +93,15 @@ export function montarPanel(raiz, ctx, yo) {
   async function montarInicio(el) {
     el.innerHTML = `<h2 class="saludo">Hola, ${esc(primerNombre(yo.nombre_completo))}</h2>
       ${esAdmin ? '<section class="tarjeta tarjeta-solicitud" id="tarjeta-solicitudes" hidden></section>' : ''}
+      <section class="tarjeta tarjeta-avisos" id="tarjeta-avisos" hidden></section>
       <section class="tarjeta"><h2>Turnos de hoy</h2><div id="en-vivo" class="lista"></div></section>
       <section class="tarjeta"><h2>Resumen</h2><div id="resumen"><p class="cargando">Cargando…</p></div></section>
       <p class="pie"><a href="#/diagnostico">Diagnóstico</a> · versión ${esc(APP_VERSION)}</p>`;
-    const vivo = $('#en-vivo', el);
-    pintarEnVivo(vivo);
-    vivo.addEventListener('click', (e) => { const b = e.target.closest('[data-turno]'); if (b) verTurno(b.dataset.turno, yo, () => pintarEnVivo(vivo)); });
-    const reloj = setInterval(() => { if (document.visibilityState === 'visible' && el.isConnected) pintarEnVivo(vivo); }, 30000);
+    const vivo = $('#en-vivo', el), tAvisos = $('#tarjeta-avisos', el);
+    const refrescar = () => { pintarEnVivo(vivo); pintarAvisos(tAvisos, yo, refrescar); revisarAvisos(); };
+    refrescar();
+    vivo.addEventListener('click', (e) => { const b = e.target.closest('[data-turno]'); if (b) verTurno(b.dataset.turno, yo, refrescar); });
+    const reloj = setInterval(() => { if (document.visibilityState === 'visible' && el.isConnected) refrescar(); }, 30000);
     ctx.alDesmontar(() => clearInterval(reloj));
     if (esAdmin) { pendientes = -1; revisarSolicitudes(); }
     if (!esAdmin) { $('#resumen', el).closest('section').remove(); return; }
