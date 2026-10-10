@@ -116,6 +116,33 @@ export async function avisar(notificacionId) {
   } catch { /* sin internet: el aviso queda en la app */ }
 }
 
+// Función "avisos": push (clave pública, prueba) y limpieza manual de fotos. Devuelve el JSON de la respuesta.
+export async function avisos(cuerpo) {
+  const t = await tokenVigente();
+  const res = await pedir('/functions/v1/avisos', { metodo: 'POST', cuerpo, token: t, crudo: true });
+  try { return await res.json(); } catch { return { ok: false, error: 'error_interno' }; }
+}
+
+// Cambiar la contraseña de la cuenta con la que se entró (gerencia y admin). Primero confirma la actual.
+export async function cambiarPassword(actual, nueva) {
+  const email = sesion?.user?.email;
+  if (!email) throw new ApiError('sin_sesion', 'Inicia sesión para continuar.', 401);
+  try {
+    await pedir('/auth/v1/token?grant_type=password', { metodo: 'POST', cuerpo: { email, password: actual } });
+  } catch (e) {
+    if (e.status === 400 || e.status === 422) throw new ApiError('credenciales', 'La contraseña actual no es correcta.', e.status);
+    throw e;
+  }
+  const t = await tokenVigente();
+  try {
+    await pedir('/auth/v1/user', { metodo: 'PUT', cuerpo: { password: nueva }, token: t });
+  } catch (e) {
+    if (/same|different/i.test(e.message)) throw new ApiError('igual', 'La nueva contraseña debe ser distinta a la actual.', e.status);
+    if (/weak|short|characters/i.test(e.message)) throw new ApiError('debil', 'La contraseña es muy débil. Usa al menos 8 caracteres con letras y números.', e.status);
+    throw e;
+  }
+}
+
 // ---------- fotos ----------
 const cacheFotos = new Map(); // "ruta|version" -> { url, vence }
 export async function urlsFotos(items, bucket = 'avatares') {

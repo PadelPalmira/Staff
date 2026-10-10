@@ -28,8 +28,65 @@ export async function montarTareasAdmin(el, ctx, yo) {
   let tareas = [];
   el.innerHTML = `<div class="enc-seccion"><h2>Tareas</h2><button type="button" class="btn chico" data-nueva>＋ Nueva</button></div>
     <p class="sub">Esto es lo que ve el personal en su checklist. Los cambios aplican a los turnos que se abran desde ahora; los turnos ya abiertos no cambian.</p>
-    <div id="lista-tareas-cfg"><p class="cargando">Cargando…</p></div>`;
+    <section class="tarjeta tarjeta-avisos" id="tareas-problema" hidden></section>
+    <div id="lista-tareas-cfg"><p class="cargando">Cargando…</p></div>
+    <div class="enc-seccion" style="margin-top:22px"><h3 class="sub-titulo" style="margin:0">🔔 Recordatorios</h3><button type="button" class="btn chico" data-nuevo-rec>＋ Nuevo</button></div>
+    <p class="ayuda">Avisos a una hora fija para quien esté en turno (en la pantalla y, si está activado, como notificación en el celular del club). No cuentan como tarea.</p>
+    <div id="lista-rec" class="lista"></div>`;
   const cont = $('#lista-tareas-cfg', el);
+  const cRec = $('#lista-rec', el), cProb = $('#tareas-problema', el);
+  let recs = [];
+  async function cargarRec() {
+    try { recs = await api.seleccionar('recordatorios', 'select=id,texto,turnos,dias,horas,activo&order=creado_en.asc'); } catch { recs = []; }
+    cRec.innerHTML = recs.length ? recs.map((r) => `<button type="button" class="fila ${r.activo ? '' : 'apagada'}" data-rec="${esc(r.id)}"><div class="fila-txt"><b>${esc(r.texto)}</b>
+      <span>${(r.horas || []).map((h) => String(h).slice(0, 5)).join(', ')} · ${r.turnos?.length ? r.turnos.map((c) => (TURNOS.find((x) => x[0] === c) || [0, c])[1].toLowerCase()).join(' y ') : 'todos los turnos'}${r.dias?.length ? ` · ${r.dias.map((d) => DIAS_LARGO[d]).join(', ')}` : ''}</span></div>
+      ${r.activo ? '' : '<span class="insignia gris">Apagado</span>'}</button>`).join('') : '<p class="detalle">No hay recordatorios.</p>';
+  }
+  function formRec(r) {
+    const nuevo = !r;
+    r = r || { texto: '', turnos: null, dias: null, horas: ['10:00'], activo: true };
+    const v = ventana(`<form class="formulario" novalidate>
+      <div class="campo"><label for="r-txt">Texto del recordatorio</label><input id="r-txt" type="text" maxlength="120" value="${esc(r.texto)}" placeholder="Ej. Revisa el WhatsApp del club"></div>
+      <div class="campo"><label for="r-horas">Horas <span class="opc">(separadas por coma, formato 24 h)</span></label><input id="r-horas" type="text" inputmode="numeric" value="${esc((r.horas || []).map((h) => String(h).slice(0, 5)).join(', '))}" placeholder="10:00, 13:30"></div>
+      <div class="campo"><label>Turnos <span class="opc">(si no marcas ninguno, en todos)</span></label>
+        <div class="chips">${TURNOS.map(([k, n]) => `<label class="chip-sel ancho"><input type="checkbox" name="rturno" value="${k}" ${r.turnos?.includes(k) ? 'checked' : ''}><span>${n}</span></label>`).join('')}</div></div>
+      <div class="campo"><label>Días <span class="opc">(si no marcas ninguno, todos)</span></label>
+        <div class="chips">${DIAS.map(([n, l]) => `<label class="chip-sel"><input type="checkbox" name="rdia" value="${n}" ${r.dias?.includes(n) ? 'checked' : ''}><span>${l}<small>${DIAS_LARGO[n]}</small></span></label>`).join('')}</div></div>
+      <label class="interruptor"><input type="checkbox" id="r-act" ${r.activo ? 'checked' : ''}><span>Activo</span></label>
+      <button class="btn" type="submit">${nuevo ? 'Crear recordatorio' : 'Guardar'}</button></form>`, { titulo: nuevo ? 'Nuevo recordatorio' : 'Recordatorio' });
+    const f = $('form', v.el);
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const horas = $('#r-horas', f).value.split(/[,\s]+/).map((x) => x.trim()).filter(Boolean).map((x) => (/^\d{1,2}$/.test(x) ? `${x}:00` : x));
+      if (!horas.length || horas.some((h) => !/^([01]?\d|2[0-3]):[0-5]\d$/.test(h))) return aviso('Escribe las horas como 10:00, 13:30.', 'error');
+      conOcupado($('button[type=submit]', f), async () => {
+        const res = await api.rpc('recordatorio_guardar', { p_id: nuevo ? null : r.id, p_datos: { texto: $('#r-txt', f).value, horas,
+          turnos: $$('input[name=rturno]:checked', f).map((i) => i.value), dias: $$('input[name=rdia]:checked', f).map((i) => Number(i.value)), activo: $('#r-act', f).checked } });
+        if (!res.ok) return aviso(res.error === 'falta_texto' ? 'Escribe el texto (mínimo 3 letras).' : res.error === 'hora_invalida' ? 'Revisa las horas.' : 'No se pudo guardar.', 'error');
+        v.cerrar(); aviso('Recordatorio guardado.', 'ok'); cargarRec();
+      });
+    });
+  }
+  // Tareas que más se atrasan o no se hacen (últimos 30 días) con una sugerencia
+  async function cargarProblema() {
+    let r;
+    try { r = await api.rpc('tareas_problema', { p_dias: 30 }); } catch { return; }
+    const l = (r?.tareas || []).slice(0, 6);
+    cProb.hidden = !l.length;
+    if (!l.length) return;
+    const tip = (t) => {
+      if (t.sin_hacer + t.no_se_pudo > t.tarde) return t.no_se_pudo > t.sin_hacer ? 'Seguido “no se puede”: revisa si falta material o herramienta.' : 'Muchas veces no se hace: ¿sigue siendo necesaria? ¿se entiende bien?';
+      if (t.regla === 'desde_apertura') return `Se hace tarde: prueba darle más de ${t.minutos} min desde que abren.`;
+      if (t.regla === 'hora_fija') return `Se hace tarde: prueba mover la hora límite (${String(t.hora).slice(0, 5)}).`;
+      return 'Se hace tarde: revisa el tiempo límite o explícala al equipo.';
+    };
+    cProb.innerHTML = `<div class="enc-avisos"><h2>🧐 Tareas con problemas (30 días)</h2></div><div class="lista">${l.map((t) => `<div class="fila inv"><div class="fila-txt">
+      <b>${esc(t.nombre)}</b><span>${t.pct_problema}% con problema de ${t.total} · ${t.tarde} tarde · ${t.sin_hacer} sin hacer · ${t.no_se_pudo} no se pudo</span>
+      <span class="ok-txt">💡 ${esc(tip(t))}</span></div></div>`).join('')}</div>`;
+  }
+  $('[data-nuevo-rec]', el).addEventListener('click', () => formRec(null));
+  cRec.addEventListener('click', (e) => { const b = e.target.closest('[data-rec]'); if (b) formRec(recs.find((x) => x.id === b.dataset.rec)); });
+  cargarRec(); cargarProblema();
 
   async function cargar() {
     try { tareas = await api.seleccionar('tareas_plantilla', `select=${COLS}&order=orden.asc,nombre.asc`); }

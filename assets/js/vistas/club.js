@@ -3,6 +3,8 @@
 import * as api from '../api.js';
 import { APP_VERSION } from '../config.js';
 import { montarEmpleado } from './empleado.js';
+import { enviarCola, cola } from '../cola.js';
+import { estadoPush, activarPush } from '../push.js';
 import { esc, $, $$, avatar, hidratarAvatares, aviso, primerNombre, horaCorta, ventana, conOcupado, selectorFoto,
          campoPin, activarMostrar, soloNumeros, pinValido, celularValido, MENSAJE_PIN, mostrarError, quitarError } from '../ui.js';
 
@@ -21,14 +23,33 @@ async function crearClub(raiz, ctx, { porAdmin, inicial }) {
   const limpiezas = [];
   ctx.alDesmontar(() => { cerrado = true; limpiezas.forEach((f) => f()); });
 
+  // Marcas hechas sin internet: se mandan solas al volver la señal (aunque la persona ya haya salido)
+  const mandarCola = async () => {
+    if (!navigator.onLine || !cola().length) return;
+    const r = await enviarCola();
+    if (r?.enviadas && !token) aviso(r.enviadas === 1 ? 'Se envió la marca que estaba guardada sin internet.' : `Se enviaron ${r.enviadas} marcas que estaban guardadas sin internet.`, 'ok', 5000);
+  };
+  window.addEventListener('online', mandarCola);
+  const relojCola = setInterval(mandarCola, 60000);
+  ctx.alDesmontar(() => { window.removeEventListener('online', mandarCola); clearInterval(relojCola); });
+  mandarCola();
+
   // ---------- selector de usuario ----------
   async function pantallaSelector() {
     raiz.innerHTML = `<main class="pantalla">
       <header class="cab-club"><div class="logo-chip chico" aria-hidden="true">PP</div><div><h1>¿Quién eres?</h1><p class="sub">Toca tu nombre</p></div>
         ${porAdmin ? '' : '<button type="button" class="btn-mas" data-pedir aria-label="Pedir un usuario nuevo" title="Pedir un usuario nuevo">＋</button>'}</header>
       <div class="tiles" id="tiles"><p class="cargando">Cargando…</p></div>
-      <p class="pie"><a href="#/diagnostico">Diagnóstico</a> · versión ${esc(APP_VERSION)}</p></main>`;
+      <p class="pie"><a href="#/diagnostico">Diagnóstico</a> · versión ${esc(APP_VERSION)}${porAdmin ? '' : ' · <button type="button" class="enlace" data-push hidden>🔔 Activar avisos en este celular</button>'}</p></main>`;
     $('[data-pedir]', raiz)?.addEventListener('click', ventanaSolicitud);
+    const bp = $('[data-push]', raiz);
+    if (bp) {
+      estadoPush().then((e) => { if (bp.isConnected) bp.hidden = e === 'activo' || e === 'no_soportado'; });
+      bp.addEventListener('click', () => conOcupado(bp, async () => {
+        try { await activarPush(); aviso('Listo: este celular va a recibir recordatorios y avisos de tareas vencidas.', 'ok', 6000); bp.hidden = true; }
+        catch (err) { aviso(err.message, 'error', 8000); }
+      }));
+    }
     let personal = null, sinRed = false;
     try { personal = await api.rpc('listar_personal'); api.guardarLocal(LLAVE_PERSONAL, personal); }
     catch (e) {

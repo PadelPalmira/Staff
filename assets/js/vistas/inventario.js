@@ -57,10 +57,23 @@ export function montarInventario(el, ctx, yo) {
 
 // ================= PEDIDOS (+ subir a Loyverse) =================
 function segPedidosYCarga(el) {
-  el.innerHTML = '<div id="inv-sync"></div><div id="inv-peds"></div>';
+  el.innerHTML = '<div id="inv-sync"></div><section class="tarjeta por-pedir" id="inv-bajas" hidden></section><div id="inv-peds"></div>';
   const recargar = () => segPedidosYCarga(el);
   segLoyverse($('#inv-sync', el), recargar);
+  segBajas($('#inv-bajas', el));
   segPedidos($('#inv-peds', el), recargar);
+}
+
+// Por pedir: artículos en o debajo de "Existencias bajas" de Loyverse (último export + pedidos recibidos después)
+async function segBajas(el) {
+  const r = await rpc('inv_bajas');
+  if (!r.ok || !r.items?.length) { el.hidden = true; return; }
+  el.hidden = false;
+  el.innerHTML = `<div class="enc-avisos"><h2>📉 Por pedir (${r.items.length})</h2><span class="sub">export del ${esc(fechaHora(r.subido_en))}</span></div>
+    <p class="ayuda">Según la columna “Existencias bajas” de Loyverse. Para que aparezca un artículo, ponle ese número en Loyverse y sube un export nuevo.</p>
+    <div class="lista">${r.items.map((a) => { const e = estiloCategoria(a.categoria); const q = Number(a.stock || 0) + Number(a.recibido || 0);
+      return `<div class="fila inv" style="--cat:${e.color}"><div class="fila-txt"><b>${e.emoji} ${esc(a.nombre)}</b>
+        <span>Quedan <b class="${q <= 0 ? 'mal-txt' : 'warn-txt'}">${esc(cantidad(q))}</b> ${esc(unidadTxt(a, q))} · mínimo ${esc(cantidad(a.minimo))}${Number(a.recibido) ? ` · incluye ${esc(cantidad(a.recibido))} recibidas después del export` : ''}</span></div></div>`; }).join('')}</div>`;
 }
 
 async function segPedidos(el, recargar) {
@@ -160,7 +173,7 @@ async function segConteos(el) {
   try {
     [conteos, perfiles, tipos, ajustes] = await Promise.all([
       api.seleccionar('inv_conteos', 'select=id,fecha,estado,asignado_tipo,asignado_perfil,contado_por_nombre,iniciado_en,enviado_en,revisado_en,faltante,sobrante,deuda,ajuste_aplicado_en&order=creado_en.desc&limit=20'),
-      api.seleccionar('perfiles', 'select=id,nombre_completo,rol,estado&rol=eq.recepcion&estado=eq.activo&order=nombre_completo.asc'),
+      api.rpc('listar_personal').catch(() => []),
       api.seleccionar('tipos_turno', 'select=clave,nombre&activo=eq.true&order=orden.asc'),
       api.seleccionar('ajustes', 'select=clave,valor'),
     ]);

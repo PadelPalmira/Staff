@@ -1,6 +1,6 @@
 // Service worker de PP Staff: guarda la app en el teléfono para abrirla sin internet
 // y recibe notificaciones. No toca las llamadas a Supabase ni a otros servidores.
-const VERSION = '0.7.0';
+const VERSION = '0.8.0';
 const CACHE = `ppstaff-shell-${VERSION}`;
 const SHELL = [
   './',
@@ -23,6 +23,12 @@ const SHELL = [
   './assets/js/vistas/inventario_emp.js',
   './assets/js/csv.js',
   './assets/js/categorias.js',
+  './assets/js/cola.js',
+  './assets/js/push.js',
+  './assets/js/pend.js',
+  './assets/js/vistas/pendientes.js',
+  './assets/js/vistas/pendientes_emp.js',
+  './assets/js/vistas/mas.js',
   './assets/js/vistas/registro.js',
   './assets/js/vistas/diagnostico.js',
   './assets/img/icon-180.png',
@@ -81,14 +87,16 @@ self.addEventListener('fetch', (event) => {
   })());
 });
 
-// Notificaciones push (se usarán desde la Fase 1).
+// Notificaciones push: avisos de gerencia y recordatorios del celular del club.
 self.addEventListener('push', (event) => {
   let data = {};
   try { data = event.data ? event.data.json() : {}; } catch (e) { data = { body: event.data && event.data.text() }; }
   event.waitUntil(self.registration.showNotification(data.title || 'PP Staff', {
     body: data.body || '',
     icon: 'assets/img/icon-192.png',
+    badge: 'assets/img/favicon-32.png',
     tag: data.tag || undefined,
+    renotify: !!data.tag,
     data: { url: data.url || './' },
   }));
 });

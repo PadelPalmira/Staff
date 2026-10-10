@@ -121,14 +121,14 @@ export async function verTurno(id, yo, alCambiar) {
 export async function montarTurnos(el, ctx, yo) {
   let vista = api.leerLocal('ppstaff-turnos-vista') || 'semana';
   el.innerHTML = `<div class="enc-seccion"><h2>Turnos</h2></div>
-    <div class="segmentos" role="tablist"><button type="button" data-vista="semana">Semana</button><button type="button" data-vista="historial">Historial</button></div>
+    <div class="segmentos tres" role="tablist"><button type="button" data-vista="semana">Semana</button><button type="button" data-vista="ranking">🏆 Ranking</button><button type="button" data-vista="historial">Historial</button></div>
     <div id="vista-turnos"></div>`;
   const cont = $('#vista-turnos', el);
   function poner(v) {
     vista = v; api.guardarLocal('ppstaff-turnos-vista', v);
     $$('[data-vista]', el).forEach((b) => b.setAttribute('aria-selected', String(b.dataset.vista === v)));
     cont.onclick = null;
-    if (v === 'semana') montarSemana(cont, yo); else montarHistorial(cont, yo);
+    if (v === 'semana') montarSemana(cont, yo); else if (v === 'ranking') montarRanking(cont, yo); else montarHistorial(cont, yo);
   }
   $('.segmentos', el).addEventListener('click', (e) => { const b = e.target.closest('[data-vista]'); if (b) poner(b.dataset.vista); });
   poner(vista);
@@ -241,4 +241,45 @@ export async function pintarAvisos(el, yo, alCambiar) {
     const vt = e.target.closest('[data-ver-turno]');
     if (vt && vt.dataset.verTurno) verTurno(vt.dataset.verTurno, yo, alCambiar);
   };
+}
+
+// ---------- ranking del mes ----------
+const mesTxt = (iso) => new Date(`${iso}T12:00:00Z`).toLocaleDateString('es-MX', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+const primeroDeMes = (iso) => `${iso.slice(0, 7)}-01`;
+const moverMes = (iso, n) => { const d = new Date(`${iso}T12:00:00Z`); d.setUTCDate(1); d.setUTCMonth(d.getUTCMonth() + n); return d.toISOString().slice(0, 10); };
+async function montarRanking(el) {
+  let mes = primeroDeMes(hoyMx());
+  el.innerHTML = `<div class="semana-nav"><button type="button" class="icono-btn" data-mes="-1" aria-label="Mes anterior">‹</button><b id="rk-tit" class="cap"></b>
+    <button type="button" class="icono-btn" data-mes="1" aria-label="Mes siguiente">›</button></div><div id="rk-cont"></div>`;
+  const cont = $('#rk-cont', el);
+  async function cargar() {
+    const este = mes === primeroDeMes(hoyMx());
+    $('#rk-tit', el).textContent = `${este ? 'Este mes · ' : ''}${mesTxt(mes)}`;
+    $('[data-mes="1"]', el).disabled = este;
+    cont.innerHTML = '<p class="cargando">Cargando…</p>';
+    let r;
+    try { r = await api.rpc('ranking', { p_mes: mes }); } catch (e) { cont.innerHTML = `<div class="tarjeta vacio"><p>${esc(e.message)}</p></div>`; return; }
+    if (!r.ok) { cont.innerHTML = '<div class="tarjeta vacio"><p>No tienes permiso para ver esto.</p></div>'; return; }
+    const ant = new Map((r.anterior || []).map((e) => [e.perfil_id, e]));
+    const em = r.empleado_mes;
+    let h = em ? `<section class="tarjeta empleado-mes"><h2>🏆 Empleado del mes · ${esc(mesTxt(moverMes(mes, -1)))}</h2><p><b>${esc(em.nombre)}</b> · puntaje ${em.puntaje}
+      (${em.cumplimiento}% tareas, ${em.puntualidad}% puntual, ${em.turnos} turnos)</p><p class="ayuda">Se elige entre quienes tuvieron al menos 4 turnos el mes anterior.</p></section>` : '';
+    h += '<p class="ayuda">Puntaje = 70% tareas a tiempo (las fuera de tiempo cuentan la mitad) + 30% puntualidad al abrir, −5 por cada turno que no cerró. “No aplica” y excusadas no cuentan.</p>';
+    if (!r.mes.length) h += '<div class="tarjeta vacio"><p><b>Todavía no hay turnos cerrados este mes.</b></p></div>';
+    h += r.mes.map((e, i) => {
+      const a = ant.get(e.perfil_id), ra = r.rachas?.[e.perfil_id] || {};
+      const d = a ? e.puntaje - a.puntaje : null;
+      const medalla = ['🥇', '🥈', '🥉'][i] || `${i + 1}.`;
+      const color = (v) => (v >= 90 ? 'ok-txt' : v >= 75 ? 'warn-txt' : 'mal-txt');
+      return `<section class="tarjeta"><div class="enc-avisos"><h2>${medalla} ${esc(e.nombre)}</h2><span class="sub">${e.turnos} turno${e.turnos === 1 ? '' : 's'}</span></div>
+        <div class="cifras"><div><b>${e.puntaje}</b><span>Puntaje${d != null && d !== 0 ? `<br><i class="${d > 0 ? 'ok-txt' : 'mal-txt'}">${d > 0 ? '▲' : '▼'} ${Math.abs(d)}</i>` : ''}</span></div>
+          <div><b class="${color(e.cumplimiento)}">${e.cumplimiento}%</b><span>Tareas a tiempo</span></div>
+          <div><b class="${color(e.puntualidad)}">${e.puntualidad}%</b><span>Puntual</span></div>
+          <div><b>${ra.perfecta || 0}🔥</b><span>Racha<br><i>mejor ${ra.mejor_perfecta || 0}</i></span></div></div>
+        <p class="detalle">${e.a_tiempo} a tiempo · ${e.tarde} fuera de tiempo · ${e.no_se_pudo} no se pudo · ${e.sin_hacer} sin hacer${e.cierres_auto ? ` · <span class="mal-txt">${e.cierres_auto} sin cerrar</span>` : ''}</p></section>`;
+    }).join('');
+    cont.innerHTML = h;
+  }
+  el.onclick = (e) => { const n = e.target.closest('[data-mes]'); if (n) { mes = moverMes(mes, Number(n.dataset.mes)); cargar(); } };
+  cargar();
 }

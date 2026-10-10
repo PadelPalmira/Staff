@@ -1,4 +1,4 @@
-// Ajustes (solo administrador): horarios de turnos, días cerrados y correo de prueba.
+// Ajustes (solo administrador): horarios de turnos, días cerrados, alertas, correo de prueba y limpieza de fotos.
 import * as api from '../api.js';
 import { esc, $, $$, aviso, ventana, confirmar, conOcupado } from '../ui.js';
 import { hoyMx } from './turnos.js';
@@ -18,7 +18,10 @@ export async function montarAjustes(el) {
     <form class="tarjeta formulario" id="aj-alertas" novalidate><p class="cargando">Cargando…</p></form>
     <h3 class="sub-titulo">Correos</h3>
     <section class="tarjeta"><p class="detalle" style="margin-top:0">Las invitaciones y avisos se mandan desde Gmail. Manda una prueba a tu correo para confirmar que funciona.</p>
-      <button type="button" class="btn ghost" data-probar-correo>Enviar correo de prueba</button></section>`;
+      <button type="button" class="btn ghost" data-probar-correo>Enviar correo de prueba</button></section>
+    <h3 class="sub-titulo">Fotos</h3>
+    <section class="tarjeta"><p class="detalle" style="margin-top:0">Las fotos viejas se borran solas cada madrugada según los días de arriba (así no se llena el espacio gratis de Supabase: 1 GB).</p>
+      <button type="button" class="btn ghost" data-limpiar>Borrar fotos viejas ahora</button></section>`;
   const cTurnos = $('#aj-turnos', el), cDias = $('#aj-dias', el);
   let tipos = [];
 
@@ -79,6 +82,9 @@ export async function montarAjustes(el) {
     ['margen_fuera_horario_min', 'Margen de "fuera de horario"', 'minutos; tareas marcadas o turno cerrado después de la salida + este margen avisan a gerencia', 'number'],
     ['resumen_semanal_hora', 'Correo del resumen semanal', 'hora de los lunes', 'time'],
     ['inactividad_minutos', 'Cerrar usuario por inactividad', 'minutos sin usar el celular del club', 'number'],
+    ['cerro_antes_min', 'Aviso "cerró antes de su hora"', 'minutos antes de la salida; si cierra más temprano que esto, aparece en Avisos', 'number'],
+    ['fotos_tareas_dias', 'Guardar fotos de tareas', 'días (7 a 365); después se borran solas. Las de incidencias se guardan hasta que se resuelven', 'number'],
+    ['fotos_tickets_dias', 'Guardar fotos de tickets de pedidos', 'días (30 a 730)', 'number'],
   ];
   const fAl = $('#aj-alertas', el);
   let valores = {};
@@ -89,6 +95,8 @@ export async function montarAjustes(el) {
     } catch (e) { fAl.innerHTML = `<p class="detalle">${esc(e.message)}</p>`; return; }
     fAl.innerHTML = `<label class="interruptor"><input type="checkbox" id="al-activas" ${valores.alertas_activas !== false ? 'checked' : ''}>
         <span><b>Alertas activas</b> — si las apagas, no se manda ningún aviso automático ni se cierran turnos solos.</span></label>
+      <label class="interruptor"><input type="checkbox" id="al-correo-cierre" ${valores.correo_cierre_turno !== false ? 'checked' : ''}>
+        <span><b>Correo al cerrar cada turno</b> — resumen a gerencia y admin: horas, tareas cumplidas, lo que faltó y la nota de relevo.</span></label>
       ${CAMPOS.map(([k, t, ayuda, tipo]) => `<div class="campo"><label for="al-${k}">${t}</label>
         <input id="al-${k}" data-clave="${k}" type="${tipo}" ${tipo === 'number' ? 'inputmode="numeric" min="0"' : ''} value="${esc(valores[k] ?? '')}">
         <p class="ayuda">${ayuda}</p></div>`).join('')}
@@ -100,6 +108,8 @@ export async function montarAjustes(el) {
       const cambios = [];
       const act = $('#al-activas', fAl).checked;
       if (act !== (valores.alertas_activas !== false)) cambios.push(['alertas_activas', String(act)]);
+      const cc = $('#al-correo-cierre', fAl).checked;
+      if (cc !== (valores.correo_cierre_turno !== false)) cambios.push(['correo_cierre_turno', String(cc)]);
       $$('[data-clave]', fAl).forEach((i) => { if (String(i.value) !== String(valores[i.dataset.clave] ?? '')) cambios.push([i.dataset.clave, i.value]); });
       if (!cambios.length) return aviso('No hay cambios.', 'info');
       for (const [k, v] of cambios) {
@@ -121,6 +131,13 @@ export async function montarAjustes(el) {
     if (!r.ok) return aviso(ERR[r.error] || 'No se pudo.', 'error');
     aviso('Listo.', 'ok'); cargar();
   });
+  $('[data-limpiar]', el).addEventListener('click', (e) => conOcupado(e.currentTarget, async () => {
+    try {
+      const r = await api.avisos({ accion: 'limpieza' });
+      if (!r.ok) return aviso('No se pudo limpiar ahora. Se intentará en la madrugada.', 'error');
+      aviso(r.evidencias || r.tickets ? `Se borraron ${r.evidencias} fotos de tareas/incidencias y ${r.tickets} de tickets.` : 'No había fotos viejas para borrar.', 'ok', 6000);
+    } catch (err) { aviso(err.message, 'error'); }
+  }));
   $('[data-probar-correo]', el).addEventListener('click', (e) => conOcupado(e.currentTarget, async () => {
     try {
       const r = await api.funcion('probar_correo');
