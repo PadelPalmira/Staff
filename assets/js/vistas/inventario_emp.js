@@ -57,6 +57,14 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
         <span>${p.items.map((i) => `${esc(cantidad(i.cantidad))} ${esc(i.en_empaques ? plural(i.empaque_nombre, i.cantidad) : plural(i.unidad || 'pieza', i.cantidad))} ${esc(i.nombre)}`).join(' · ')}</span>
         ${p.comentario ? `<span class="warn-txt">Gerencia: ${esc(p.comentario)}</span>` : ''}</div><span class="insignia ${cl}">${esc(t)}</span></div>`;
     }).join('')}</div>` : '<p class="detalle">Todavía no has recibido pedidos.</p>';
+    const SOL = { pendiente: ['En revisión', 'gris'], aprobada: ['Aprobada · se crea en Loyverse', ''], hecha: ['Listo', ''], rechazada: ['No aprobada', 'mal'] };
+    h += `<h3 class="sub-titulo">Artículos del catálogo</h3>
+      <div class="fila-botones" style="margin-top:0"><button type="button" class="btn ghost" data-sol-alta>＋ Pedir artículo nuevo</button>
+      <button type="button" class="btn ghost" data-sol-baja>➖ Ya no se vende</button></div>
+      <p class="ayuda">¿Llegó algo que no está en la lista o ya no se vende algo? Avísale a gerencia aquí.</p>`;
+    if (est.solicitudes?.length) h += `<div class="lista">${est.solicitudes.map((x) => { const [t, cl] = SOL[x.estado] || [x.estado, 'gris'];
+      return `<div class="fila inv"><span class="pend-ico">${x.tipo === 'alta' ? '➕' : '➖'}</span><div class="fila-txt"><b>${esc(x.nombre)}</b><span>${esc(fechaHora(x.creado_en))}${x.respuesta ? ` · Gerencia: ${esc(x.respuesta)}` : ''}</span></div>
+        <span class="insignia ${cl}">${esc(t)}</span></div>`; }).join('')}</div>`;
     const vistos = est.cobros.filter((b) => b.visto_en);
     if (vistos.length) h += `<h3 class="sub-titulo">Descuadres anteriores</h3><div class="lista">${vistos.map((b) => `<button type="button" class="fila" data-cobro="${esc(b.id)}"><div class="fila-txt"><b>Conteo del ${esc(fechaCorta(b.fecha_conteo + 'T12:00:00'))}</b><span>${esc(pesos(b.monto))}</span></div></button>`).join('')}</div>`;
     raiz.innerHTML = h;
@@ -271,8 +279,64 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     });
   }
 
+  // ---------- pedir alta / baja de un artículo ----------
+  function ventanaSolicitud(tipo) {
+    const alta = tipo === 'alta';
+    const cats = (est.categorias || []).slice().sort();
+    const v = ventana(`<form class="formulario" novalidate>
+      ${alta ? `<p class="detalle" style="margin-top:0">Gerencia lo revisa y, si lo aprueba, lo da de alta en Loyverse. Después aparece en la lista para contar y recibir.</p>
+        <div class="campo"><label for="sa-nom">Nombre del artículo</label><input id="sa-nom" type="text" maxlength="80" placeholder="Ej. Gatorade Zero 600 ml"></div>
+        <div class="campo"><label for="sa-cat">Categoría</label><select id="sa-cat"><option value="">—</option>${cats.map((c) => `<option>${esc(c)}</option>`).join('')}</select></div>
+        <div class="campo"><label for="sa-precio">Precio de venta sugerido <span class="opc">($, opcional)</span></label><input id="sa-precio" type="number" inputmode="decimal" min="0" step="any"></div>`
+      : `<p class="detalle" style="margin-top:0">Elige el artículo que ya no se vende en el club. Gerencia lo revisa y lo quita de la lista.</p>
+        <div class="campo"><label for="sb-buscar">Artículo</label><input id="sb-buscar" type="text" placeholder="Busca el artículo…" autocomplete="off"><div class="lista" id="sb-sug" style="margin-top:6px"></div></div>
+        <p class="detalle" id="sb-elegido" hidden></p>`}
+      <div class="campo"><label for="sa-nota">${alta ? 'Nota' : '¿Por qué?'} ${alta ? '<span class="opc">(opcional)</span>' : ''}</label><input id="sa-nota" type="text" placeholder="${alta ? 'Ej. lo piden mucho los clientes' : 'Ej. el proveedor ya no lo trae'}"></div>
+      <div class="campo"><label>Foto <span class="opc">(opcional)</span></label><label class="btn ghost chico">📷 Tomar foto<input type="file" accept="image/*" capture="environment" class="oculto-accesible" id="sa-foto"></label>
+        <img class="evidencia previa-mini" id="sa-prev" alt="" hidden></div>
+      <button class="btn" type="submit">Enviar a gerencia</button></form>`, { titulo: alta ? '＋ Artículo nuevo' : '➖ Ya no se vende' });
+    const f = $('form', v.el);
+    let elegido = null, blob = null;
+    $('#sa-foto', f).addEventListener('change', async (e) => {
+      const file = e.target.files?.[0]; if (!file) return;
+      try { blob = await comprimirEvidencia(file); const im = $('#sa-prev', f); im.src = URL.createObjectURL(blob); im.hidden = false; } catch { aviso('No se pudo leer la foto.', 'error'); }
+    });
+    if (!alta) {
+      $('#sb-buscar', f).addEventListener('input', (e) => {
+        const q = e.target.value.trim().toLowerCase();
+        const l = q.length < 2 ? [] : est.catalogo.filter((a) => a.nombre.toLowerCase().includes(q)).slice(0, 8);
+        $('#sb-sug', f).innerHTML = l.map((a) => `<button type="button" class="fila" data-elegir="${esc(a.id)}">${miniArticulo(a, 36)}<div class="fila-txt"><b>${esc(a.nombre)}</b></div></button>`).join('');
+        hidratarFotosArticulos($('#sb-sug', f), api);
+      });
+      $('#sb-sug', f).addEventListener('click', (e) => {
+        const b = e.target.closest('[data-elegir]'); if (!b) return;
+        elegido = est.catalogo.find((a) => a.id === b.dataset.elegir);
+        $('#sb-sug', f).innerHTML = ''; $('#sb-buscar', f).value = '';
+        const p = $('#sb-elegido', f); p.hidden = false; p.innerHTML = `Elegido: <b>${esc(elegido.nombre)}</b>`;
+      });
+    }
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const nota = $('#sa-nota', f).value.trim();
+      if (alta && $('#sa-nom', f).value.trim().length < 3) return aviso('Escribe el nombre del artículo.', 'error');
+      if (!alta && !elegido) return aviso('Busca y elige el artículo.', 'error');
+      if (!alta && nota.length < 3) return aviso('Escribe por qué ya no se vende.', 'error');
+      conOcupado($('button[type=submit]', f), async () => {
+        let ruta = null;
+        if (blob) { try { ruta = `inventario/${uuid()}.jpg`; await api.subirFoto(ruta, blob, 'evidencias'); } catch { return aviso('No se pudo subir la foto. Intenta de nuevo o quítala.', 'error'); } }
+        const r = await llamar('inv_sol_crear', { p_tipo: tipo, p_articulo: elegido?.id || null, p_nombre: alta ? $('#sa-nom', f).value : null,
+          p_categoria: alta ? $('#sa-cat', f).value : null, p_precio: alta ? Number($('#sa-precio', f).value) || null : null, p_nota: nota, p_foto: ruta });
+        if (!r.ok) return aviso({ ya_solicitado: 'Ya hay una solicitud para quitar ese artículo.', falta_nombre: 'Escribe el nombre del artículo.', falta_nota: 'Escribe por qué ya no se vende.' }[r.error] || msg(r), 'error');
+        if (r.notificacion_id) api.avisar(r.notificacion_id);
+        v.cerrar(); aviso('Listo, se le avisó a gerencia.', 'ok'); cargar();
+      });
+    });
+  }
+
   raiz.addEventListener('click', (e) => {
     if (vista !== 'inicio') return;
+    if (e.target.closest('[data-sol-alta]')) return ventanaSolicitud('alta');
+    if (e.target.closest('[data-sol-baja]')) return ventanaSolicitud('baja');
     if (e.target.closest('[data-recargar]')) return cargar();
     if (e.target.closest('[data-recibir]')) return pintarPedido();
     if (e.target.closest('[data-contar]')) return pintarConteo();

@@ -1,5 +1,6 @@
 // PP Staff · arranque y rutas.
 //   #/registro/<token>  -> registro de una persona invitada (sin cuenta)
+//   #/restablecer/<t>   -> contraseña nueva desde el enlace del correo
 //   #/diagnostico       -> prueba del teléfono
 //   (cualquier otra)    -> según la cuenta: celular del club (PIN) o panel de admin/gerencia
 import * as api from './api.js';
@@ -9,6 +10,7 @@ import { montarClub, montarComoUsuario } from './vistas/club.js';
 import { montarPanel } from './vistas/panel.js';
 import { montarRegistro } from './vistas/registro.js';
 import { montarDiagnostico } from './vistas/diagnostico.js';
+import { montarRestablecer } from './vistas/restablecer.js';
 
 const raiz = document.getElementById('app');
 const limpiezas = [];
@@ -38,9 +40,14 @@ function pantallaMensaje({ titulo, texto, boton, alTocar, secundario }) {
 async function iniciar() {
   const yo = ++carrera;
   limpiar();
+  // al cambiar de pantalla no deben quedar ventanas abiertas de la anterior
+  const vs = document.getElementById('ventanas'); if (vs) vs.innerHTML = '';
+  document.body.classList.remove('ventana-abierta');
   const hash = location.hash || '';
   const reg = hash.match(/^#\/registro\/([A-Za-z0-9_-]+)/);
   if (reg) return montarRegistro(raiz, ctx, reg[1]);
+  const rest = hash.match(/^#\/restablecer\/([A-Za-z0-9_-]+)/);
+  if (rest) return montarRestablecer(raiz, ctx, rest[1]);
   if (hash.startsWith('#/diagnostico')) return montarDiagnostico(raiz, ctx);
   if (!api.haySesion()) return montarLogin(raiz, ctx);
 

@@ -102,9 +102,9 @@ export async function seleccionar(tabla, consulta) {
 
 // ---------- función del servidor ----------
 // Devuelve siempre el objeto de la respuesta ({ok:true,...} o {ok:false,error,mensaje}); solo lanza si no hay conexión.
-export async function funcion(accion, datos = {}, { conSesion = true } = {}) {
+export async function funcion(accion, datos = {}, { conSesion = true, fn = 'gestion-usuarios' } = {}) {
   const t = conSesion ? await tokenVigente() : null;
-  const res = await pedir('/functions/v1/gestion-usuarios', { metodo: 'POST', cuerpo: { accion, ...datos }, token: t || SUPABASE_KEY, crudo: true });
+  const res = await pedir(`/functions/v1/${fn}`, { metodo: 'POST', cuerpo: { accion, ...datos }, token: t || SUPABASE_KEY, crudo: true });
   try { return await res.json(); } catch { return { ok: false, error: 'error_interno', mensaje: 'La respuesta del servidor no se entendió.' }; }
 }
 
@@ -138,6 +138,25 @@ export async function cambiarPassword(actual, nueva) {
     await pedir('/auth/v1/user', { metodo: 'PUT', cuerpo: { password: nueva }, token: t });
   } catch (e) {
     if (/same|different/i.test(e.message)) throw new ApiError('igual', 'La nueva contraseña debe ser distinta a la actual.', e.status);
+    if (/weak|short|characters/i.test(e.message)) throw new ApiError('debil', 'La contraseña es muy débil. Usa al menos 8 caracteres con letras y números.', e.status);
+    throw e;
+  }
+}
+
+// Enlace de "olvidé mi contraseña": canjea el token del correo por una sesión y pone la contraseña nueva.
+export async function restablecerPassword(tokenHash, nueva) {
+  let d;
+  try { d = await pedir('/auth/v1/verify', { metodo: 'POST', cuerpo: { type: 'recovery', token_hash: tokenHash } }); }
+  catch (e) {
+    if (e.codigo === 'sin_conexion') throw e;
+    throw new ApiError('enlace_vencido', 'El enlace ya no sirve (venció o ya se usó). Pide uno nuevo desde “¿Olvidaste tu contraseña?”.', e.status);
+  }
+  if (!d?.access_token) throw new ApiError('enlace_vencido', 'El enlace ya no sirve. Pide uno nuevo.', 400);
+  fijarSesion(desdeRespuesta(d));
+  try {
+    await pedir('/auth/v1/user', { metodo: 'PUT', cuerpo: { password: nueva }, token: d.access_token });
+  } catch (e) {
+    if (/same|different/i.test(e.message)) throw new ApiError('igual', 'La nueva contraseña debe ser distinta a la anterior.', e.status);
     if (/weak|short|characters/i.test(e.message)) throw new ApiError('debil', 'La contraseña es muy débil. Usa al menos 8 caracteres con letras y números.', e.status);
     throw e;
   }

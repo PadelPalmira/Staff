@@ -3,7 +3,8 @@ import * as api from '../api.js';
 import { esc, $, $$, aviso, ventana, conOcupado, horaCorta, fechaHora, duracionTexto } from '../ui.js';
 
 const TZ = 'America/Mexico_City';
-const COLS_TURNO = 'id,fecha,tipo,perfil_nombre,estado,inicio_prog,fin_prog,abierto_en,cerrado_en,tarde_min,abierto_con_aviso,cierre_auto,resumen';
+const COLS_TURNO = 'id,fecha,tipo,perfil_nombre,estado,inicio_prog,fin_prog,abierto_en,cerrado_en,tarde_min,abierto_con_aviso,cierre_auto,resumen,abrio_nombre,entregado_a_nombre,entregado_en,motivo_entrega';
+const cubreTxt = (t) => (t.abrio_nombre && t.abrio_nombre !== t.perfil_nombre ? ` (cubre a ${t.abrio_nombre.split(' ')[0]})` : t.entregado_a_nombre ? ` (lo entregó a ${t.entregado_a_nombre.split(' ')[0]})` : '');
 const COLS_TAREA = 'id,turno_id,nombre,momento,orden,limite,requiere_foto,estado,marcada_en,a_tiempo,foto_path,razon,excusa_motivo,etiqueta_no_aplica';
 const ERR = { sin_permiso: 'No tienes permiso para esto.', no_pendiente: 'Esa tarea ya no está pendiente.', no_excusada: 'Esa tarea no estaba excusada.', no_existe: 'Ya no existe.' };
 
@@ -25,7 +26,7 @@ export async function pintarEnVivo(el) {
     el.innerHTML = turnos.map((t) => {
       if (t.estado === 'cerrado') {
         const r = t.resumen || {};
-        return `<button type="button" class="fila" data-turno="${esc(t.id)}"><div class="fila-txt"><b>${esc(t.perfil_nombre)} · ${esc(nombreTipo(t.tipo))}</b>
+        return `<button type="button" class="fila" data-turno="${esc(t.id)}"><div class="fila-txt"><b>${esc(t.perfil_nombre)} · ${esc(nombreTipo(t.tipo))}${esc(cubreTxt(t))}</b>
           <span>Cerrado a las ${esc(horaCorta(t.cerrado_en))} · ${r.sin_hacer ? `${r.sin_hacer} sin hacer` : 'todo cumplido'}${r.no_se_pudo ? ` · ${r.no_se_pudo} no se pudo` : ''}</span></div>
           <span class="insignia ${r.sin_hacer ? 'aviso-i' : ''}">Cerrado</span></button>`;
       }
@@ -34,7 +35,7 @@ export async function pintarEnVivo(el) {
       const venc = l.filter((x) => x.estado === 'pendiente' && x.limite && new Date(x.limite) < ahora).length;
       const nsp = l.filter((x) => x.estado === 'no_se_pudo').length;
       const pct = l.length ? Math.round((ok / l.length) * 100) : 100;
-      return `<button type="button" class="fila vivo" data-turno="${esc(t.id)}"><div class="fila-txt"><b>${esc(t.perfil_nombre)} · ${esc(nombreTipo(t.tipo))}</b>
+      return `<button type="button" class="fila vivo" data-turno="${esc(t.id)}"><div class="fila-txt"><b>${esc(t.perfil_nombre)} · ${esc(nombreTipo(t.tipo))}${esc(cubreTxt(t))}</b>
         <span>Abierto a las ${esc(horaCorta(t.abierto_en))} · ${ok}/${l.length} tareas${venc ? ` · ${venc} vencida${venc === 1 ? '' : 's'}` : ''}${nsp ? ` · ${nsp} no se pudo` : ''}</span>
         <div class="progreso chico"><span style="width:${pct}%"></span></div></div>
         <span class="insignia ${venc ? 'mal' : ''}">${venc ? 'Atrasado' : 'Abierto'}</span></button>`;
@@ -58,7 +59,9 @@ export async function verTurno(id, yo, alCambiar) {
       <dl class="datos"><dt>Horario</dt><dd>${esc(horaCorta(t.inicio_prog))} – ${esc(horaCorta(t.fin_prog))}</dd>
         <dt>Abrió</dt><dd>${esc(horaCorta(t.abierto_en))}${t.tarde_min > 0 ? ` (${t.tarde_min} min tarde)` : ''}${t.abierto_con_aviso ? ' · con aviso' : ''}</dd>
         <dt>Cerró</dt><dd>${t.cierre_auto ? `<span class="mal-txt">No cerró · cierre automático ${esc(fechaHora(t.cerrado_en))}</span>`
-          : t.cerrado_en ? `${esc(horaCorta(t.cerrado_en))} · duró ${esc(duracionTexto(r.duracion_min))}${r.cerro_antes_min > 0 ? ` · ${r.cerro_antes_min} min antes` : ''}` : 'Sigue abierto'}</dd></dl>`;
+          : t.cerrado_en ? `${esc(horaCorta(t.cerrado_en))} · duró ${esc(duracionTexto(r.duracion_min))}${r.cerro_antes_min > 0 ? ` · ${r.cerro_antes_min} min antes` : ''}` : 'Sigue abierto'}</dd>
+        ${t.entregado_a_nombre ? `<dt>Cobertura</dt><dd>🔁 ${t.abrio_nombre && t.abrio_nombre !== t.perfil_nombre ? `Lo abrió ${esc(t.abrio_nombre)}; ` : ''}lo cubre ${esc(t.entregado_a_nombre)} desde las ${esc(horaCorta(t.entregado_en))}${t.motivo_entrega ? ` · ${esc(t.motivo_entrega)}` : ''}</dd>` : ''}</dl>
+      ${t.estado === 'abierto' ? '<button type="button" class="btn ghost chico" data-pasar-turno style="margin:4px 0 6px">🔁 Pasar este turno a otra persona</button>' : ''}`;
     for (const [mom, titulo] of [['apertura', 'Al abrir'], ['semanal', 'Semanales'], ['cierre', 'Al cerrar']]) {
       const l = tareas.filter((x) => x.momento === mom);
       if (!l.length) continue;
@@ -87,6 +90,7 @@ export async function verTurno(id, yo, alCambiar) {
     $$('img[data-foto]', v.el).forEach((im) => { const u = urls.get(`${im.dataset.foto}|`); if (u) { im.src = u; im.hidden = false; } });
   }
   v.el.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-pasar-turno]')) return pasarTurno(id, () => { pintar(); alCambiar?.(); });
     const im = e.target.closest('img.evidencia');
     if (im && im.src) { const g = ventana(`<img class="evidencia grande" src="${esc(im.src)}" alt="">`, { titulo: 'Evidencia' }); return void g; }
     const fila = e.target.closest('.tarea');
@@ -115,6 +119,26 @@ export async function verTurno(id, yo, alCambiar) {
     }
   });
   pintar();
+}
+
+// Gerencia pasa un turno abierto a otra persona (ej. alguien se fue y otro sigue)
+async function pasarTurno(turnoId, alListo) {
+  let personal = [];
+  try { personal = await api.rpc('listar_personal'); } catch { /* sin lista */ }
+  const v = ventana(`<form class="formulario" novalidate>
+    <p class="detalle" style="margin-top:0">Las tareas que faltan pasan a la persona que elijas (a su turno abierto si ya tiene uno). Lo que ya se hizo sigue contando para quien lo hizo.</p>
+    <div class="campo"><label for="ps-quien">¿Quién sigue con el turno?</label><select id="ps-quien">${personal.map((p) => `<option value="${esc(p.id)}">${esc(p.nombre_completo)}</option>`).join('')}</select></div>
+    <div class="campo"><label for="ps-mot">Motivo <span class="opc">(opcional)</span></label><input id="ps-mot" type="text" placeholder="Ej. Luz se fue a una cita"></div>
+    <button class="btn" type="submit">Pasar turno</button></form>`, { titulo: 'Pasar turno' });
+  const f = $('form', v.el);
+  f.addEventListener('submit', (e) => {
+    e.preventDefault();
+    conOcupado($('button[type=submit]', f), async () => {
+      const r = await api.rpc('cobertura_asignar', { p_turno_id: turnoId, p_perfil: $('#ps-quien', f).value, p_motivo: $('#ps-mot', f).value });
+      if (!r.ok) return aviso({ mismo: 'Ese turno ya es de esa persona.', turno_cerrado: 'El turno ya se cerró.', perfil_invalido: 'Elige a una persona.' }[r.error] || 'No se pudo pasar el turno.', 'error');
+      v.cerrar(); aviso(`Turno pasado. ${r.tareas} tarea${r.tareas === 1 ? '' : 's'} pendiente${r.tareas === 1 ? '' : 's'}.`, 'ok'); alListo?.();
+    });
+  });
 }
 
 // ---------- pestaña Turnos ----------
@@ -152,7 +176,7 @@ async function montarHistorial(el, yo) {
           : t.cierre_auto ? '<span class="insignia mal">Cierre automático</span>'
           : r.sin_hacer ? `<span class="insignia mal">${r.sin_hacer} sin hacer</span>`
           : r.no_se_pudo ? `<span class="insignia aviso-i">${r.no_se_pudo} no se pudo</span>` : '<span class="insignia">Completo</span>';
-        return `${cab}<button type="button" class="fila" data-turno="${esc(t.id)}"><div class="fila-txt"><b>${esc(t.perfil_nombre)} · ${esc(nombreTipo(t.tipo))}</b>
+        return `${cab}<button type="button" class="fila" data-turno="${esc(t.id)}"><div class="fila-txt"><b>${esc(t.perfil_nombre)} · ${esc(nombreTipo(t.tipo))}${esc(cubreTxt(t))}</b>
           <span>${esc(horaCorta(t.abierto_en))}${t.cierre_auto ? ' · no cerró' : t.cerrado_en ? ` – ${esc(horaCorta(t.cerrado_en))}` : ' · sigue abierto'}${t.tarde_min > 0 ? ` · ${t.tarde_min} min tarde` : ''}</span></div>${insignia}</button>`;
       }).join('');
     } catch (e) { lista.innerHTML = `<div class="tarjeta vacio"><p>${esc(e.message)}</p></div>`; }
@@ -202,11 +226,11 @@ async function montarSemana(el, yo) {
           <div><b class="${t.pendientes ? 'mal-txt' : ''}">${t.pendientes || 0}</b><span>Sin hacer</span></div>
           <div><b class="${t.no_se_pudo ? 'warn-txt' : ''}">${t.no_se_pudo || 0}</b><span>No se pudo</span></div>
         </div>
-        <p class="detalle">${t.a_tiempo || 0} a tiempo · ${t.tarde || 0} fuera de tiempo · ${t.excusadas || 0} excusadas${e.cierres_auto ? ` · <span class="mal-txt">${e.cierres_auto} sin cerrar (cierre automático)</span>` : ''}${fuera ? ` · <span class="warn-txt">${fuera} fuera de horario</span>` : ''}</p>
+        <p class="detalle">${t.a_tiempo || 0} a tiempo · ${t.tarde || 0} fuera de tiempo · ${t.excusadas || 0} excusadas${e.cierres_auto ? ` · <span class="mal-txt">${e.cierres_auto} sin cerrar (cierre automático)</span>` : ''}${fuera ? ` · <span class="warn-txt">${fuera} fuera de horario</span>` : ''}${e.coberturas ? ` · 🔁 cubrió ${e.coberturas} turno${e.coberturas === 1 ? '' : 's'} de otra persona` : ''}</p>
         <div class="lista dias-semana">${(e.dias || []).map((d) => `<button type="button" class="fila dia" data-turno="${esc(d.turno_id)}">
           <div class="fila-txt"><b class="cap">${esc(diaCorto(d.fecha))} · ${esc(d.tipo_nombre)}</b>
           <span>Abrió <b class="${d.tarde_min > tol ? 'mal-txt' : 'ok-txt'}">${esc(horaCorta(d.abierto_en))}</b> (entrada ${esc(horaCorta(d.inicio_prog))}${d.tarde_min > 0 ? `, +${d.tarde_min} min` : ''})
-          · ${d.cierre_auto ? '<span class="mal-txt">no cerró</span>' : d.cerrado_en ? `cerró ${esc(horaCorta(d.cerrado_en))}` : 'sigue abierto'}</span></div></button>`).join('')}</div></section>`;
+          · ${d.entregado_a_nombre ? `🔁 lo entregó a ${esc(d.entregado_a_nombre)} a las ${esc(horaCorta(d.entregado_en))}` : d.cierre_auto ? '<span class="mal-txt">no cerró</span>' : d.cerrado_en ? `cerró ${esc(horaCorta(d.cerrado_en))}` : 'sigue abierto'}</span></div></button>`).join('')}</div></section>`;
     }).join('');
   }
   el.onclick = (e) => {
@@ -276,7 +300,7 @@ async function montarRanking(el) {
           <div><b class="${color(e.cumplimiento)}">${e.cumplimiento}%</b><span>Tareas a tiempo</span></div>
           <div><b class="${color(e.puntualidad)}">${e.puntualidad}%</b><span>Puntual</span></div>
           <div><b>${ra.perfecta || 0}🔥</b><span>Racha<br><i>mejor ${ra.mejor_perfecta || 0}</i></span></div></div>
-        <p class="detalle">${e.a_tiempo} a tiempo · ${e.tarde} fuera de tiempo · ${e.no_se_pudo} no se pudo · ${e.sin_hacer} sin hacer${e.cierres_auto ? ` · <span class="mal-txt">${e.cierres_auto} sin cerrar</span>` : ''}</p></section>`;
+        <p class="detalle">${e.a_tiempo} a tiempo · ${e.tarde} fuera de tiempo · ${e.no_se_pudo} no se pudo · ${e.sin_hacer} sin hacer${e.cierres_auto ? ` · <span class="mal-txt">${e.cierres_auto} sin cerrar</span>` : ''}${e.coberturas ? ` · 🔁 ${e.coberturas} cobertura${e.coberturas === 1 ? '' : 's'}` : ''}</p></section>`;
     }).join('');
     cont.innerHTML = h;
   }

@@ -12,6 +12,8 @@ const ERR = {
   no_es_tu_turno: 'Esta tarea es de otro turno.', turno_cerrado: 'El turno ya está cerrado.', excusada: 'La gerencia ya excusó esta tarea.',
   falta_foto: 'Esta tarea necesita foto.', falta_razon: 'Escribe la razón (mínimo 3 letras).', no_condicional: 'Esta tarea no tiene la opción "No aplica".',
   falta_reporte: 'Escribe cómo sigue la incidencia (mínimo 3 letras).',
+  falta_motivo: 'Escribe el motivo (mínimo 3 letras).', ya_no_disponible: 'Esa solicitud ya no está disponible (ya la tomó alguien o se canceló).',
+  no_es_para_ti: 'Esa solicitud es para otro compañero.', sin_turno: 'No tienes un turno abierto.', mismo: 'Ese turno ya es tuyo.', perfil_invalido: 'Ese compañero ya no está activo.',
   sin_conexion: 'No hay internet. Revisa la conexión e intenta de nuevo.',
 };
 const msg = (r) => ERR[r?.error] || r?.mensaje || 'No se pudo completar. Intenta de nuevo.';
@@ -257,19 +259,32 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     if (invEst?.conteo) h += `<section class="tarjeta conteo-pend"><h2>📋 Hoy toca conteo de inventario</h2><p class="detalle">Sin clientes ni tickets abiertos, antes de las ${esc(invEst.conteo.limite)}.</p>
       <button type="button" class="btn" data-ir-inv>Ir a Inventario</button></section>`;
     if (est.dia_cerrado) h += `<p class="nota-aviso">Hoy está marcado como día cerrado${est.motivo_cerrado ? `: ${esc(est.motivo_cerrado)}` : ''}.</p>`;
+    for (const c of est.coberturas || []) {
+      h += `<section class="tarjeta cobertura"><h2>🙋 ${esc(c.de_nombre)} pide que ${c.para_mi ? 'tú cubras' : 'alguien cubra'} su turno</h2>
+        <p class="detalle">Turno ${esc(c.tipo_nombre || '')} · sale a las ${esc(horaCorta(c.fin_prog))} · quedan <b>${c.pendientes}</b> tarea${c.pendientes === 1 ? '' : 's'} pendiente${c.pendientes === 1 ? '' : 's'}${c.motivo ? `<br>Motivo: ${esc(c.motivo)}` : ''}</p>
+        <button type="button" class="btn" data-cubrir="${esc(c.id)}">Cubrir su turno</button></section>`;
+    }
+    if (est.entregado && !est.mio) h += `<section class="tarjeta"><h2>🔁 Entregaste tu turno</h2><p class="detalle">Lo cubre <b>${esc(est.entregado.a_nombre)}</b> desde las ${esc(horaCorta(est.entregado.resuelta_en))}. Las tareas que ya hiciste cuentan para ti.</p></section>`;
     if (est.mio) {
       const t = est.mio, total = t.tareas.length, ok = hechas(t.tareas), venc = t.tareas.filter(vencida).length;
       const pct = total ? Math.round((ok / total) * 100) : 100;
       h += `<section class="tarjeta turno-abierto t-${esc(t.tipo)}"><h2>${ICONO_TURNO[t.tipo] || ''} Turno ${esc(t.tipo_nombre)}</h2>
         <p class="detalle">Abierto a las ${esc(horaCorta(t.abierto_en))} · sale a las ${esc(horaCorta(t.fin_prog))}</p>
+        ${cubriendo(t)}
         <div class="progreso" role="progressbar" aria-valuenow="${pct}" aria-valuemin="0" aria-valuemax="100"><span style="width:${pct}%"></span></div>
         <p class="detalle"><b>${ok}</b> de ${total} tareas listas${venc ? ` · <span class="mal-txt">${venc} vencida${venc === 1 ? '' : 's'}</span>` : ''}</p>
-        <button type="button" class="btn grande ${t.tipo === 'tarde' ? 'atardecer' : ''}" data-ir-tareas>Ir a mis tareas</button></section>`;
+        <button type="button" class="btn grande ${t.tipo === 'tarde' ? 'atardecer' : ''}" data-ir-tareas>Ir a mis tareas</button>
+        ${est.mi_cobertura ? '' : '<button type="button" class="btn ghost" data-pedir-cob style="margin-top:10px">🙋 Me tengo que ir · pedir que me cubran</button>'}</section>`;
+      h += tarjetaMiCobertura();
     } else {
       const sug = sugerido();
-      const otros = est.otros_abiertos;
+      const conSolicitud = new Set((est.coberturas || []).map((c) => c.de_nombre));
+      const otros = est.otros_abiertos.filter((o) => !conSolicitud.has(o.perfil_nombre));
       h += `<section class="tarjeta"><h2>Tu turno</h2>`;
-      if (otros.length) h += `<p class="nota-aviso">Hay un turno abierto: ${otros.map((o) => `${esc(o.perfil_nombre)} (${esc(o.tipo_nombre)}, desde las ${esc(horaCorta(o.abierto_en))})`).join('; ')}. Si ya terminó, pídele que lo cierre.</p>`;
+      if (otros.length) {
+        h += `<p class="nota-aviso">Hay un turno abierto: ${otros.map((o) => `${esc(o.perfil_nombre)} (${esc(o.tipo_nombre)}, desde las ${esc(horaCorta(o.abierto_en))})`).join('; ')}. Si ya terminó, pídele que lo cierre.</p>`;
+        h += otros.map((o) => `<button type="button" class="btn ghost chico" data-tomar="${esc(o.id)}" data-nombre="${esc(o.perfil_nombre)}" data-pend="${o.pendientes ?? ''}" style="margin:0 0 8px">🔁 Cubrir el turno de ${esc(primerNombre(o.perfil_nombre))}${o.pendientes != null ? ` (${o.pendientes} pendientes)` : ''}</button>`).join('');
+      }
       if (!est.tipos.length) h += '<p class="detalle">Hoy no hay turnos programados.</p>';
       h += est.tipos.map((t) => `<button type="button" class="btn ${t.clave === sug ? 'grande' : 'ghost'} btn-turno turno-${esc(t.clave)}" data-abrir="${esc(t.clave)}" ${t.ya_abierto ? 'disabled' : ''}>
           <span class="btn-turno-txt">${ICONO_TURNO[t.clave] || ''} ${t.ya_abierto ? `Turno ${esc(t.nombre)} · ya se abrió hoy` : `Comenzar turno ${esc(t.nombre)}`}</span><small>${esc(t.inicio.slice(0, 5))} – ${esc(t.fin.slice(0, 5))}</small></button>`).join('');
@@ -284,6 +299,67 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
       <button type="button" class="btn ghost" data-ir-pend>Ver pendientes</button></section>`;
     h += tarjetaDesempeno();
     return h;
+  }
+
+  // ---------- cubrir turnos ----------
+  function cubriendo(t) {
+    if (!t.abrio_nombre || t.abrio_nombre === t.perfil_nombre) return '';
+    return `<p class="nota-info">🔁 Estás cubriendo el turno de <b>${esc(t.abrio_nombre)}</b> desde las ${esc(horaCorta(t.entregado_en))}.${t.motivo_entrega ? ` Motivo: ${esc(t.motivo_entrega)}.` : ''}</p>`;
+  }
+  function tarjetaMiCobertura() {
+    const c = est.mi_cobertura;
+    if (!c) return '';
+    return `<section class="tarjeta cobertura"><h2>⏳ Pediste que te cubran</h2>
+      <p class="detalle">${c.para_nombre ? `Le pediste a <b>${esc(c.para_nombre)}</b>` : 'Cualquier compañero puede aceptarlo'} (${esc(c.motivo || '')}). Cuando entre con su PIN y acepte, tu turno y tus tareas pendientes pasan a su nombre; lo que ya hiciste cuenta para ti.</p>
+      <p class="ayuda">Mientras tanto sigue marcando tus tareas. Después solo toca “Salir de mi usuario”.</p>
+      <button type="button" class="btn ghost chico" data-cancelar-cob>Ya no me voy (cancelar)</button></section>`;
+  }
+  function pedirCobertura() {
+    const comp = est.companeros || [];
+    const v = ventana(`<form class="formulario" novalidate>
+      <p class="detalle" style="margin-top:0">Tu compañero entra con su PIN en este celular y toca “Cubrir su turno”. Desde ese momento el turno y las tareas que faltan quedan a su nombre. Se avisa a gerencia.</p>
+      <div class="campo"><label for="cb-para">¿Quién te cubre?</label><select id="cb-para"><option value="">Cualquier compañero</option>${comp.map((c) => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`).join('')}</select></div>
+      <div class="campo"><label for="cb-mot">Motivo</label><input id="cb-mot" type="text" maxlength="120" placeholder="Ej. cita médica, emergencia familiar"></div>
+      <button class="btn" type="submit">Pedir que me cubran</button></form>`, { titulo: '🙋 Me tengo que ir' });
+    const f = $('form', v.el);
+    f.addEventListener('submit', (e) => {
+      e.preventDefault(); quitarError(f);
+      if ($('#cb-mot', f).value.trim().length < 3) return mostrarError(f, 'Escribe el motivo (mínimo 3 letras).');
+      conOcupado($('button[type=submit]', f), async () => {
+        const r = await llamar('cobertura_pedir', { p_para: $('#cb-para', f).value || null, p_motivo: $('#cb-mot', f).value });
+        if (!r.ok) return mostrarError(f, msg(r));
+        v.cerrar(); aviso('Listo. Cuando tu compañero entre con su PIN verá tu solicitud.', 'ok', 5000); cargar({ silencioso: true });
+      });
+    });
+  }
+  async function aceptarCobertura(id) {
+    const c = (est.coberturas || []).find((x) => x.id === id);
+    if (!c) return;
+    const yaTengo = !!est.mio;
+    if (!await confirmar({ titulo: 'Cubrir turno', ok: 'Sí, lo cubro',
+      texto: yaTengo ? `Las ${c.pendientes} tareas pendientes de ${c.de_nombre} se pasan a tu turno y el suyo se cierra. ¿Seguir?`
+        : `El turno ${c.tipo_nombre || ''} de ${c.de_nombre} pasa a tu nombre con sus ${c.pendientes} tareas pendientes. ¿Seguir?` })) return;
+    const r = await llamar('cobertura_aceptar', { p_id: id });
+    if (!r.ok) return aviso(msg(r), 'error');
+    aviso(`Ahora cubres el turno de ${primerNombre(c.de_nombre)}. Se avisó a gerencia.`, 'ok', 5000);
+    await cargar({ silencioso: true }); ir('tareas');
+  }
+  function tomarTurno(id, nombre, pend) {
+    const v = ventana(`<form class="formulario" novalidate>
+      <p class="detalle" style="margin-top:0">Usa esto solo si <b>${esc(nombre)}</b> ya se fue sin pedir que la cubrieran. ${est.mio ? 'Sus tareas pendientes se pasan a tu turno.' : 'Su turno pasa a tu nombre'}${pend ? ` (${pend} tareas pendientes)` : ''}. Se avisa a gerencia.</p>
+      <div class="campo"><label for="tm-mot">¿Qué pasó?</label><input id="tm-mot" type="text" maxlength="120" placeholder="Ej. se sintió mal y se fue"></div>
+      <button class="btn" type="submit">Cubrir el turno</button></form>`, { titulo: `🔁 Cubrir a ${primerNombre(nombre)}` });
+    const f = $('form', v.el);
+    f.addEventListener('submit', (e) => {
+      e.preventDefault(); quitarError(f);
+      if ($('#tm-mot', f).value.trim().length < 3) return mostrarError(f, 'Escribe qué pasó (mínimo 3 letras).');
+      conOcupado($('button[type=submit]', f), async () => {
+        const r = await llamar('cobertura_tomar', { p_turno_id: id, p_motivo: $('#tm-mot', f).value });
+        if (!r.ok) return mostrarError(f, msg(r));
+        v.cerrar(); aviso(`Ahora cubres el turno de ${primerNombre(nombre)}. Se avisó a gerencia.`, 'ok', 5000);
+        await cargar({ silencioso: true }); ir('tareas');
+      });
+    });
   }
 
   async function abrir(clave, forzar = false) {
@@ -334,6 +410,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     if (!t) return `<h2 class="saludo">Tareas</h2><div class="tarjeta vacio"><p><b>Todavía no abres tu turno.</b></p><p>Cuando comiences tu turno, aquí aparecen tus tareas.</p>
       <button type="button" class="btn" data-ir-inicio>Ir a Inicio</button></div>`;
     let h = `<h2 class="saludo">${ICONO_TURNO[t.tipo] || ''} Turno ${esc(t.tipo_nombre)}</h2><p class="sub">${hechas(t.tareas)} de ${t.tareas.length} listas · toca el círculo al terminar cada tarea</p>`;
+    h += cubriendo(t) + tarjetaMiCobertura();
     if (est.relevo && !est.relevo.leida) h += `<p class="nota-aviso">📝 Tienes una nota de relevo sin leer. <button type="button" class="enlace" data-ir-inicio>Leerla</button></p>`;
     const inc = t.tareas.filter((x) => x.incidencia_id);
     if (inc.length) h += `<h3 class="sub-titulo">🛠️ Incidencias abiertas (${hechas(inc)}/${inc.length})</h3><div class="lista-tareas">${inc.map(filaTarea).join('')}</div>`;
@@ -343,7 +420,8 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
       h += `<h3 class="sub-titulo">${titulo} (${hechas(l)}/${l.length})</h3><div class="lista-tareas">${l.map(filaTarea).join('')}</div>`;
     }
     h += `<div class="fila-botones"><button type="button" class="btn ghost" data-nuevo-pend="pendiente">📌 Agregar pendiente</button>
-      <button type="button" class="btn ghost" data-nuevo-pend="incidencia">🛠️ Reportar imprevisto</button></div>`;
+      <button type="button" class="btn ghost" data-nuevo-pend="incidencia">🛠️ Reportar imprevisto</button></div>
+      ${est.mi_cobertura ? '' : '<button type="button" class="btn ghost" data-pedir-cob style="margin-top:10px">🙋 Me tengo que ir · pedir que me cubran</button>'}`;
     h += `<button type="button" class="btn grande cerrar-turno ${t.tipo === 'tarde' ? 'atardecer' : ''}" data-cerrar-turno>Cerrar turno</button>`;
     return h;
   }
@@ -528,6 +606,13 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
       api.guardarLocal(llaveRec({ id }, hora), 1);
       return pintar();
     }
+    const cub = t.closest('[data-cubrir]');
+    if (cub) return conOcupado(cub, () => aceptarCobertura(cub.dataset.cubrir));
+    const tom = t.closest('[data-tomar]');
+    if (tom) return tomarTurno(tom.dataset.tomar, tom.dataset.nombre, tom.dataset.pend);
+    if (t.closest('[data-pedir-cob]')) return pedirCobertura();
+    const cc = t.closest('[data-cancelar-cob]');
+    if (cc) return conOcupado(cc, async () => { const r = await llamar('cobertura_cancelar'); if (!r.ok) return aviso(msg(r), 'error'); aviso('Solicitud cancelada.', 'ok'); cargar({ silencioso: true }); });
     const ab = t.closest('[data-abrir]');
     if (ab) return conOcupado(ab, () => abrir(ab.dataset.abrir));
     if (t.closest('[data-ver-resumen]')) {

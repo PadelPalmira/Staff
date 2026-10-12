@@ -316,6 +316,7 @@ export async function montarUsuarios(el, ctx, yo) {
         <button type="button" class="btn ghost" data-a="editar">Editar datos</button>
         ${p.rol !== 'dispositivo' ? `<button type="button" class="btn ghost" data-a="pin">${p.tiene_pin ? 'Cambiar PIN' : 'Asignar PIN'}</button>` : ''}
         ${bloqueado ? '<button type="button" class="btn ghost" data-a="desbloquear">Quitar bloqueo del PIN</button>' : ''}
+        ${p.rol !== 'recepcion' && !esYo ? '<button type="button" class="btn ghost" data-a="password">🔑 Cambiar contraseña</button>' : ''}
         ${esYo ? '' : `<button type="button" class="btn ghost" data-a="estado">${p.estado === 'activo' ? 'Desactivar usuario' : 'Activar usuario'}</button>
         <button type="button" class="btn peligro-suave" data-a="eliminar">Eliminar usuario</button>`}</div>`, { titulo: 'Usuario' });
     hidratarAvatares(v.el);
@@ -332,6 +333,7 @@ export async function montarUsuarios(el, ctx, yo) {
       });
       if (a === 'editar') { v.cerrar(); return ventanaEditar(p); }
       if (a === 'pin') { v.cerrar(); return ventanaPin(p); }
+      if (a === 'password') { v.cerrar(); return ventanaPassword(p); }
       if (a === 'desbloquear') return conOcupado(b, async () => {
         try {
           const r = await api.rpc('admin_desbloquear_pin', { p_id: p.id });
@@ -358,6 +360,30 @@ export async function montarUsuarios(el, ctx, yo) {
           v.cerrar(); aviso('Usuario eliminado.', 'ok'); cargar({ silencioso: true });
         } catch (err) { aviso(err.message, 'error'); }
       }
+    });
+  }
+
+  // El administrador pone una contraseña nueva (ej. si la persona la olvidó y no tiene acceso a su correo)
+  function ventanaPassword(p) {
+    const v = ventana(`<form class="formulario" novalidate>
+      <p class="detalle" style="margin-top:0">Pon una contraseña nueva para <b>${esc(p.nombre_completo)}</b> (${esc(p.email)}) y dísela en persona. Después la puede cambiar en Más → Mi cuenta.
+        ${p.rol === 'dispositivo' ? '<br><b>Ojo:</b> es la cuenta del celular del club; tendrás que volver a entrar en ese celular con la contraseña nueva.' : ''}</p>
+      ${campoPassword('cp-pass', 'Contraseña nueva', { ayuda: 'Mínimo 8 caracteres.' })}
+      <label class="interruptor"><input type="checkbox" id="cp-avisar" checked><span>Avisarle por correo que su contraseña cambió (sin decir cuál es)</span></label>
+      <button class="btn" type="submit">Cambiar contraseña</button></form>`, { titulo: '🔑 Cambiar contraseña' });
+    activarMostrar(v.el);
+    const f = $('form', v.el);
+    f.addEventListener('submit', (e) => {
+      e.preventDefault(); quitarError(f);
+      const pass = $('#cp-pass', f).value;
+      if (pass.length < 8) return mostrarError(f, 'La contraseña debe tener al menos 8 caracteres.');
+      conOcupado($('button[type=submit]', f), async () => {
+        try {
+          const r = await api.funcion('cambiar_password_admin', { perfil_id: p.id, password: pass, avisar: $('#cp-avisar', f).checked }, { fn: 'cuentas' });
+          if (!r.ok) return mostrarError(f, r.mensaje || 'No se pudo cambiar la contraseña.');
+          v.cerrar(); aviso(`Contraseña cambiada${r.avisado ? '; se le avisó por correo' : ''}.`, 'ok', 5000);
+        } catch (err) { mostrarError(f, err.message); }
+      });
     });
   }
 

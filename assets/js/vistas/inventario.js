@@ -328,26 +328,33 @@ async function verConteo(id, alCambiar) {
 // ================= LOYVERSE (sincronizar) =================
 async function segLoyverse(el, recargar) {
   el.innerHTML = '<p class="cargando">Cargando…</p>';
-  let peds, conts, cargas, ajustes;
+  let peds, conts, cargas, ajustes, manuales;
   try {
-    [peds, conts, cargas, ajustes] = await Promise.all([
+    [peds, conts, cargas, ajustes, manuales] = await Promise.all([
       api.seleccionar('inv_pedidos', 'select=id,estado,perfil_nombre,creado_en&estado=in.(enviado,verificado)'),
       api.seleccionar('inv_conteos', 'select=id,fecha&estado=eq.revisado&ajuste_aplicado_en=is.null'),
       api.seleccionar('inv_cargas', 'select=id,creado_en,confirmado_en,pedidos,conteos&order=creado_en.desc&limit=5'),
       api.seleccionar('ajustes', 'select=clave,valor'),
+      api.seleccionar('inv_ajustes', 'select=id,cantidad,motivo,nota,creado_por_nombre,creado_en,inv_articulos(nombre,unidad)&estado=eq.pendiente&order=creado_en.desc').catch(() => []),
     ]);
   } catch (e) { el.innerHTML = `<div class="tarjeta vacio"><p>${esc(e.message)}</p></div>`; return; }
   const aj = Object.fromEntries(ajustes.map((a) => [a.clave, a.valor]));
+  const nm = manuales.length;
   const ver = peds.filter((p) => p.estado === 'verificado').length, sinVer = peds.filter((p) => p.estado === 'enviado').length;
   const diasTxt = String(aj.inv_carga_dias || '5').split(',').map((d) => ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'][d]).join(' y ');
-  let h = `<section class="tarjeta subir-loyverse ${!ver && !conts.length ? 'al-dia' : ''}"><h2>⬆︎ Subir pedidos a Loyverse</h2>
-    <p class="detalle">Toca los ${esc(diasTxt)} a las ${esc(aj.inv_carga_hora || '09:00')}. Pendiente: <b>${ver}</b> pedido${ver === 1 ? '' : 's'} verificado${ver === 1 ? '' : 's'}${conts.length ? ` y el ajuste de ${conts.length} conteo${conts.length === 1 ? '' : 's'}` : ''}.</p>
+  let h = `<section class="tarjeta subir-loyverse ${!ver && !conts.length && !nm ? 'al-dia' : ''}"><h2>⬆︎ Subir pedidos a Loyverse</h2>
+    <p class="detalle">Toca los ${esc(diasTxt)} a las ${esc(aj.inv_carga_hora || '09:00')}. Pendiente: <b>${ver}</b> pedido${ver === 1 ? '' : 's'} verificado${ver === 1 ? '' : 's'}${conts.length ? `, el ajuste de ${conts.length} conteo${conts.length === 1 ? '' : 's'}` : ''}${nm ? ` y ${nm} ajuste${nm === 1 ? '' : 's'} manual${nm === 1 ? '' : 'es'}` : ''}.</p>
     ${sinVer ? `<p class="nota-aviso">${sinVer} pedido${sinVer === 1 ? '' : 's'} sin verificar no entra${sinVer === 1 ? '' : 'n'} en esta carga. Verifícalos primero (abajo).</p>` : ''}`;
-  if (!ver && !conts.length) h += '<p class="nota-info">✓ Loyverse está al día: no hay pedidos verificados por subir.</p></section>';
+  if (!ver && !conts.length && !nm) h += '<p class="nota-info">✓ Loyverse está al día: no hay pedidos verificados ni ajustes por subir.</p></section>';
   else h += `<ol class="pasos"><li>Que no haya clientes ni tickets abiertos (si se vende algo durante estos minutos, Loyverse lo perdería).</li>
       <li>En Loyverse: Artículos › Lista de artículos › <b>Exportar</b>, y sube aquí ese archivo.</li>
       <li>Descarga el archivo que genera la app e impórtalo en Loyverse (Artículos › <b>Importar</b>).</li><li>Regresa y toca “Ya lo importé”.</li></ol>
       ${inputArchivo('ly-archivo')}<div id="ly-res"></div></section>`;
+  if (nm) h += `<details class="bitacora" open><summary>Ajustes manuales por subir (${nm})</summary><div class="lista">${manuales.map((m) => `<div class="fila inv"><div class="fila-txt">
+    <b>${Number(m.cantidad) > 0 ? '+' : ''}${esc(cantidad(m.cantidad))} ${esc(unidadTxt(m.inv_articulos, Math.abs(m.cantidad)))} · ${esc(m.inv_articulos?.nombre || '')}</b>
+    <span>${esc(m.motivo)}${m.nota ? ` · ${esc(m.nota)}` : ''} · ${esc(m.creado_por_nombre || '')} · ${esc(fechaHora(m.creado_en))}</span></div>
+    <button type="button" class="btn chico ghost" data-cancelar-ajuste="${esc(m.id)}">Cancelar</button></div>`).join('')}</div>
+    <p class="ayuda">Se aplican a Loyverse junto con los pedidos en la siguiente subida. También cuentan en el “esperado” del conteo.</p></details>`;
   h += `<details class="bitacora" ${cargas.some((g) => !g.confirmado_en) ? 'open' : ''}><summary>Últimas subidas a Loyverse</summary>${cargas.length ? `<div class="lista">${cargas.map((g) => `<div class="fila inv"><div class="fila-txt"><b>${esc(fechaHora(g.creado_en))}</b>
     <span>${g.pedidos.length} pedido${g.pedidos.length === 1 ? '' : 's'}${g.conteos.length ? ` · ajuste de ${g.conteos.length} conteo${g.conteos.length === 1 ? '' : 's'}` : ''}</span></div>
     ${g.confirmado_en ? '<span class="insignia">Importada</span>' : `<button type="button" class="btn chico ghost" data-confirmar="${esc(g.id)}">Ya lo importé</button>`}</div>`).join('')}</div>` : '<p class="detalle">Todavía no hay subidas.</p>'}</details>`;
@@ -367,7 +374,7 @@ async function segLoyverse(el, recargar) {
       const csv = generarImportacion(sub.parsed, cambios);
       const nombre = `PPStaff_importar_loyverse_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}.csv`;
       $('#ly-res', el).innerHTML = `<h3 class="sub-titulo">Cambios (${r.lineas.length} artículos)</h3><div class="tabla-dif">${r.lineas.map((l) => `<div class="dif-fila"><div class="dif-txt"><b>${esc(l.nombre)}</b>
-        <span>Loyverse ahora ${esc(cantidad(l.stock_export))}${Number(l.pedidos) ? ` · +${esc(cantidad(l.pedidos))} pedidos` : ''}${Number(l.ajuste) ? ` · ${Number(l.ajuste) > 0 ? '+' : ''}${esc(cantidad(l.ajuste))} conteo` : ''}</span></div>
+        <span>Loyverse ahora ${esc(cantidad(l.stock_export))}${Number(l.pedidos) ? ` · +${esc(cantidad(l.pedidos))} pedidos` : ''}${Number(l.ajuste) ? ` · ${Number(l.ajuste) > 0 ? '+' : ''}${esc(cantidad(l.ajuste))} ajuste` : ''}</span></div>
         <div class="dif-num"><b>${esc(cantidad(l.nuevo))}</b><span>${esc(unidadTxt(l, l.nuevo))}</span></div></div>`).join('')}</div>
         <div class="acciones" style="margin-top:12px"><button type="button" class="btn" data-descargar>⬇︎ Descargar archivo para Loyverse</button>
         <button type="button" class="btn ghost" data-confirmar="${esc(r.carga_id)}">Ya lo importé en Loyverse</button></div>`;
@@ -376,6 +383,11 @@ async function segLoyverse(el, recargar) {
     } finally { lbl.classList.remove('ocupado'); e.target.value = ''; }
   });
   el.onclick = async (e) => {
+    const ca = e.target.closest('[data-cancelar-ajuste]');
+    if (ca) {
+      if (!await confirmar({ titulo: 'Cancelar ajuste', texto: '¿Cancelar este ajuste manual? No se subirá a Loyverse.', ok: 'Cancelar ajuste', peligro: true })) return;
+      return conOcupado(ca, async () => { const r = await rpc('inv_ajuste_cancelar', { p_id: ca.dataset.cancelarAjuste }); if (!r.ok) return aviso(msg(r), 'error'); aviso('Ajuste cancelado.', 'ok'); recargar(); });
+    }
     const b = e.target.closest('[data-confirmar]');
     if (!b) return;
     if (!await confirmar({ titulo: 'Confirmar importación', texto: '¿Ya importaste el archivo en Loyverse y se aplicó sin errores?', ok: 'Sí, ya está' })) return;
@@ -393,7 +405,7 @@ async function segCatalogo(el) {
   let arts;
   try { arts = await articulos(); } catch (e) { el.innerHTML = `<div class="tarjeta vacio"><p>${esc(e.message)}</p></div>`; return; }
   let filtro = '', soloInv = true, catSel = null;
-  const head = `<p class="sub">El catálogo se actualiza solo cada vez que se sube un export de Loyverse. Aquí defines empaques (ej. caja = 24 piezas, cartón = 1000 ml), insumos y familias de sabores.</p>
+  const head = `<section class="tarjeta tarjeta-avisos" id="cat-sol" hidden></section><p class="sub">El catálogo se actualiza solo cada vez que se sube un export de Loyverse. Aquí defines empaques (ej. caja = 24 piezas, cartón = 1000 ml), insumos y familias de sabores.</p>
     ${arts.length ? '' : `<section class="tarjeta"><h2>Crear catálogo</h2><p class="detalle">Sube el export de artículos de Loyverse (Artículos › Exportar).</p>${inputArchivo('cat-archivo')}</section>`}
     <div class="conteo-barra"><input id="cat-buscar" type="text" placeholder="Buscar…" autocomplete="off">
       <label class="interruptor chico"><input type="checkbox" id="cat-solo" checked><span>Solo con inventario</span></label></div>
@@ -417,6 +429,7 @@ async function segCatalogo(el) {
     hidratarFotosArticulos(lista, api);
   }
   pintar();
+  pintarSolicitudes($('#cat-sol', el), () => segCatalogo(el));
   $('#cat-buscar', el).addEventListener('input', (e) => { filtro = e.target.value.trim().toLowerCase(); pintar(); });
   $('#cat-solo', el).addEventListener('change', (e) => { soloInv = e.target.checked; pintar(); });
   $('#cat-chips', el).addEventListener('click', (e) => { const b = e.target.closest('[data-cat-sel]'); if (b) { catSel = b.dataset.catSel || null; pintar(); } });
@@ -439,7 +452,9 @@ async function segCatalogo(el) {
         <div class="campo"><label for="ar-fac">¿Cuántas unidades trae?</label><input id="ar-fac" type="number" inputmode="decimal" min="0" step="any" value="${esc(cantidad(a.empaque_factor))}"></div></div>
       <p class="ayuda">Ej. Leche: unidad “ml”, empaque “cartón”, 1000. Jamón: unidad “rebanada”, empaque “paquete”, 20. Así el empleado cuenta cartones/paquetes y la app convierte.</p>
       <div class="campo"><label for="ar-fam">Familia <span class="opc">(para detectar cobros de otro sabor)</span></label><input id="ar-fam" type="text" value="${esc(a.familia || '')}" placeholder="Ej. Gatorade 1L"></div>
-      <button class="btn" type="submit">Guardar</button></form>`, { titulo: a.nombre });
+      <button class="btn" type="submit">Guardar</button>
+      ${contable(a) ? '<button type="button" class="btn ghost" data-ajustar style="margin-top:10px">± Ajustar existencias (sin pedido)</button>' : ''}</form>`, { titulo: a.nombre });
+    $('[data-ajustar]', v.el)?.addEventListener('click', () => { v.cerrar(); ventanaAjuste(a); });
     hidratarFotosArticulos(v.el, api);
     $('#ar-foto', v.el).addEventListener('change', async (ev) => {
       const f = ev.target.files?.[0]; if (!f) return;
@@ -468,6 +483,77 @@ async function segCatalogo(el) {
       });
     });
   });
+}
+
+// Ajuste manual de existencias: entradas o salidas que no vienen de un pedido (merma, consumo, cortesía, corrección…)
+const MOTIVOS_AJUSTE = [['-', 'Merma / caducado'], ['-', 'Roto o dañado'], ['-', 'Consumo interno'], ['-', 'Cortesía / regalo'], ['+', 'Entrada sin pedido'], ['+', 'Devolución de cliente'], ['±', 'Corrección de inventario'], ['±', 'Otro']];
+function ventanaAjuste(a) {
+  const emp = !!a.empaque_nombre && Number(a.empaque_factor) > 0;
+  const v = ventana(`<form class="formulario" novalidate>
+    <p class="detalle" style="margin-top:0">Para mover existencias de <b>${esc(a.nombre)}</b> sin un pedido. Se sube a Loyverse con la siguiente carga y cuenta en el conteo.</p>
+    <div class="campo"><label>¿Entra o sale?</label><div class="chips">
+      <label class="chip-sel ancho"><input type="radio" name="aj-sig" value="-1" checked><span>➖ Sale</span></label>
+      <label class="chip-sel ancho"><input type="radio" name="aj-sig" value="1"><span>➕ Entra</span></label></div></div>
+    <div class="fila-botones" style="margin:0"><div class="campo"><label for="aj-cant">Cantidad</label><input id="aj-cant" type="number" inputmode="decimal" min="0" step="any"></div>
+      <div class="campo"><label for="aj-modo">En</label><select id="aj-modo">${emp ? `<option value="${esc(a.empaque_factor)}">${esc(plural(a.empaque_nombre, 2))}</option>` : ''}<option value="1">${esc(unidadTxt(a, 2))}</option></select></div></div>
+    <div class="campo"><label for="aj-mot">Motivo</label><select id="aj-mot">${MOTIVOS_AJUSTE.map(([sg, m]) => `<option data-sig="${sg}">${esc(m)}</option>`).join('')}</select></div>
+    <div class="campo"><label for="aj-nota">Nota <span class="opc">(opcional)</span></label><input id="aj-nota" type="text" placeholder="Ej. se cayeron 2 en la bodega"></div>
+    <button class="btn" type="submit">Guardar ajuste</button></form>`, { titulo: 'Ajustar existencias' });
+  const f = $('form', v.el);
+  $('#aj-mot', f).addEventListener('change', (e) => {
+    const sg = e.target.selectedOptions[0].dataset.sig;
+    if (sg === '-' || sg === '+') $(`input[name=aj-sig][value="${sg === '-' ? -1 : 1}"]`, f).checked = true;
+  });
+  f.addEventListener('submit', (e) => {
+    e.preventDefault();
+    const n = Number($('#aj-cant', f).value);
+    if (!(n > 0)) return aviso('Escribe la cantidad (mayor a 0).', 'error');
+    const total = n * Number($('#aj-modo', f).value) * Number($('input[name=aj-sig]:checked', f).value);
+    conOcupado($('button[type=submit]', f), async () => {
+      const r = await rpc('inv_ajuste_crear', { p_articulo: a.id, p_cantidad: total, p_motivo: $('#aj-mot', f).value, p_nota: $('#aj-nota', f).value });
+      if (!r.ok) return aviso(r.error === 'falta_motivo' ? 'Elige el motivo.' : msg(r), 'error');
+      v.cerrar(); aviso(`Ajuste guardado: ${total > 0 ? '+' : ''}${cantidad(total)} ${unidadTxt(a, Math.abs(total))}. Se sube a Loyverse con la siguiente carga.`, 'ok', 6000);
+    });
+  });
+}
+
+// Solicitudes del personal: dar de alta un artículo nuevo o quitar uno que ya no se vende
+async function pintarSolicitudes(el, alCambiar) {
+  let l;
+  try { l = await api.seleccionar('inv_solicitudes', 'select=id,tipo,articulo_id,nombre,categoria,precio,nota,foto_path,perfil_nombre,estado,respuesta,creado_en&estado=in.(pendiente,aprobada)&order=creado_en.asc'); }
+  catch { el.hidden = true; return; }
+  el.hidden = !l.length;
+  if (!l.length) return;
+  el.innerHTML = `<div class="enc-avisos"><h2>🗂️ Solicitudes del personal (${l.length})</h2></div><div class="lista">${l.map((s) => `<button type="button" class="fila" data-sol="${esc(s.id)}">
+    <span class="pend-ico">${s.tipo === 'alta' ? '➕' : '➖'}</span><div class="fila-txt"><b>${s.tipo === 'alta' ? 'Dar de alta' : 'Ya no se vende'}: ${esc(s.nombre)}</b>
+    <span>${esc(s.perfil_nombre || '')} · ${esc(fechaHora(s.creado_en))}${s.nota ? ` · “${esc(s.nota)}”` : ''}</span></div>
+    ${s.estado === 'aprobada' ? '<span class="insignia aviso-i">Por crear en Loyverse</span>' : '<span class="insignia gris">Nueva</span>'}</button>`).join('')}</div>`;
+  el.onclick = (e) => {
+    const b = e.target.closest('[data-sol]'); if (!b) return;
+    const s = l.find((x) => x.id === b.dataset.sol);
+    const alta = s.tipo === 'alta';
+    const v = ventana(`<dl class="datos"><dt>Pidió</dt><dd>${esc(s.perfil_nombre || '')} · ${esc(fechaHora(s.creado_en))}</dd>
+        <dt>Artículo</dt><dd>${esc(s.nombre)}</dd>${s.categoria ? `<dt>Categoría</dt><dd>${esc(s.categoria)}</dd>` : ''}${s.precio ? `<dt>Precio sugerido</dt><dd>${esc(pesos(s.precio))}</dd>` : ''}
+        ${s.nota ? `<dt>Nota</dt><dd>${esc(s.nota)}</dd>` : ''}${s.respuesta ? `<dt>Respuesta</dt><dd>${esc(s.respuesta)}</dd>` : ''}</dl>
+      ${s.foto_path ? '<img class="evidencia" id="sol-foto" alt="Foto" hidden>' : ''}
+      <p class="ayuda">${alta ? (s.estado === 'aprobada'
+        ? 'Créalo en Loyverse (Artículos › Agregar) con “Seguir el inventario” activado. Después sube un export en Catálogo y toca “Ya está en Loyverse”.'
+        : 'Si lo apruebas, queda como pendiente “por crear en Loyverse”. Los artículos se dan de alta en Loyverse y llegan a la app con el siguiente export.')
+        : 'Si lo apruebas, el artículo se apaga en la app (ya no se cuenta ni se recibe). En Loyverse desmarca “Disponible para la venta” o bórralo.'}</p>
+      <div class="campo"><label for="sol-resp">Respuesta para el empleado <span class="opc">(opcional)</span></label><input id="sol-resp" type="text"></div>
+      <div class="acciones">${s.estado === 'aprobada' ? '<button type="button" class="btn" data-r="hecha">✓ Ya está en Loyverse</button>'
+        : `<button type="button" class="btn" data-r="aprobada">${alta ? 'Aprobar' : 'Aprobar y apagar el artículo'}</button>`}
+        <button type="button" class="btn peligro-suave" data-r="rechazada">Rechazar</button></div>`, { titulo: alta ? 'Artículo nuevo' : 'Quitar artículo' });
+    if (s.foto_path) api.urlsFotos([{ path: s.foto_path }], 'evidencias').then((u) => { const im = $('#sol-foto', v.el); const x = u.get(`${s.foto_path}|`); if (im && x) { im.src = x; im.hidden = false; } });
+    v.el.addEventListener('click', (ev) => {
+      const r0 = ev.target.closest('[data-r]'); if (!r0) return;
+      conOcupado(r0, async () => {
+        const r = await rpc('inv_sol_resolver', { p_id: s.id, p_estado: r0.dataset.r, p_respuesta: $('#sol-resp', v.el).value });
+        if (!r.ok) return aviso(msg(r), 'error');
+        v.cerrar(); aviso(r.estado === 'rechazada' ? 'Solicitud rechazada.' : r.estado === 'aprobada' ? 'Aprobada: créalo en Loyverse.' : 'Listo.', 'ok'); alCambiar();
+      });
+    });
+  };
 }
 
 // ================= AJUSTES (gerencia y admin) =================
