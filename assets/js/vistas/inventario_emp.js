@@ -5,7 +5,7 @@ import { esc, $, $$, aviso, ventana, confirmar, conOcupado, fechaCorta, fechaHor
 
 const ERR = {
   falta_ticket: 'Toma la foto del ticket.', sin_articulos: 'Agrega al menos un artículo.', cantidad_invalida: 'Revisa las cantidades (deben ser mayores a 0).',
-  articulo_invalido: 'Hay un artículo que no se reconoce.', conteo_no_disponible: 'Este conteo ya no está disponible (lo cerró o reasignó gerencia).',
+  articulo_invalido: 'Hay un artículo que no se reconoce.', conteo_no_disponible: 'Este conteo ya no está disponible (lo cerró o reasignó gerencia).', en_curso: 'Alguien más ya está haciendo el conteo.',
   sin_conexion: 'No hay internet. Revisa la conexión e intenta de nuevo.',
 };
 const msg = (r) => ERR[r?.error] || r?.mensaje || 'No se pudo completar. Intenta de nuevo.';
@@ -38,11 +38,16 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     let h = '<h2 class="saludo">Inventario</h2>';
     if (c) {
       const hechos = Object.keys(c.items).length, total = listaConteo(c).length;
+      const ahora = new Date().toLocaleTimeString('en-GB', { timeZone: 'America/Mexico_City', hour: '2-digit', minute: '2-digit' });
       h += `<section class="tarjeta conteo-pend"><h2>📋 ${c.reconteo ? 'Reconteo' : 'Conteo de inventario'}</h2>
-        <p class="detalle">${c.reconteo ? `Gerencia pide volver a contar ${total} artículo${total === 1 ? '' : 's'}.` : 'Cuenta todo lo que hay.'} Puedes seguir vendiendo mientras cuentas: la app descuenta sola lo que se venda. Tienes hasta las ${esc(c.limite)}.</p>
+        <p class="detalle">${c.reconteo ? `Gerencia pide volver a contar ${total} artículo${total === 1 ? '' : 's'}.` : 'Cuenta todo lo que hay.'} Puedes seguir vendiendo mientras cuentas: la app descuenta sola lo que se venda.${c.limite && ahora < c.limite ? ` Tienes hasta las ${esc(c.limite)}.` : ''}</p>
         <div class="progreso"><span style="width:${total ? Math.round((hechos / total) * 100) : 0}%"></span></div>
         <p class="detalle">${hechos} de ${total} artículos contados</p>
         <button type="button" class="btn grande" data-contar>${hechos ? 'Seguir contando' : 'Empezar conteo'}</button></section>`;
+    } else {
+      h += `<section class="tarjeta"><h2>📋 Conteo de inventario</h2>
+        <p class="detalle">Puedes hacer un conteo cuando quieras (por ejemplo al recibir o entregar tu turno). Se compara con Loyverse y gerencia lo revisa.</p>
+        <button type="button" class="btn grande" data-contar>📋 Hacer conteo</button></section>`;
     }
     for (const b of sinVer) {
       h += `<section class="tarjeta tarjeta-avisos"><h2>Descuadre del conteo del ${esc(fechaCorta(b.fecha_conteo + 'T12:00:00'))}</h2>
@@ -199,6 +204,22 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
   }
 
   // ---------- conteo ----------
+  const REGLAS_CONTEO = `<ul class="reglas-conteo">
+      <li>📦 Cuenta <b>físicamente</b> cada artículo: refri, bodega, mostrador y exhibición.</li>
+      <li>🔢 Si viene en caja o paquete, pon cuántas cajas <b>y</b> cuántas piezas sueltas.</li>
+      <li>💳 Si vendes algo mientras cuentas, cóbralo en Loyverse en ese momento (no dejes tickets abiertos).</li>
+      <li>✅ <b>Cuenta dos veces</b> antes de enviar.</li></ul>`;
+  const AVISO_COBRO = '<p class="nota-mal">⚠️ Tu conteo se compara con Loyverse. <b>Si hay faltantes, se te pueden cobrar.</b> Revisa dos veces que todo esté bien contado.</p>';
+  async function iniciarConteo() {
+    const r = await llamar('inv_conteo_iniciar');
+    if (!r.ok) return aviso(r.error === 'en_curso' ? r.mensaje : msg(r), 'error', 7000);
+    await cargar();
+    if (!est?.conteo) return aviso('No se pudo abrir el conteo. Intenta de nuevo.', 'error');
+    if (Object.keys(est.conteo.items).length) return pintarConteo();
+    const v = ventana(`${AVISO_COBRO}${REGLAS_CONTEO}
+      <div class="acciones"><button type="button" class="btn grande" data-ok>Entendido, empezar a contar</button></div>`, { titulo: 'Antes de empezar' });
+    $('[data-ok]', v.el).addEventListener('click', () => { v.cerrar(); pintarConteo(); });
+  }
   function pintarConteo() {
     const el = nuevaVista();
     vista = 'conteo';
@@ -209,6 +230,7 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     const cats = [...new Set(lista.map((a) => a.categoria || 'Sin categoría'))];
     const contados = () => Object.keys(items).length;
     el.innerHTML = `<div class="enc-seccion"><h2>${c.reconteo ? 'Reconteo' : 'Conteo'}</h2><button type="button" class="enlace" data-volver>Salir</button></div>
+      ${AVISO_COBRO}
       <p class="nota-aviso">Cuenta lo que hay físicamente, artículo por artículo. Si vendes algo, cóbralo en Loyverse en ese momento (no dejes tickets abiertos).</p>
       <div class="conteo-barra"><input id="co-buscar" type="text" placeholder="Buscar artículo…" autocomplete="off"><b id="co-prog"></b></div>
       <div class="cat-chips" role="navigation" aria-label="Categorías">${cats.map((cat) => { const e = estiloCategoria(cat); return `<button type="button" class="cat-chip" style="--cat:${e.color}" data-ir-cat="${esc(cat)}"><span>${e.emoji}</span>${esc(cat)}<i data-cat-prog="${esc(cat)}"></i></button>`; }).join('')}</div>
@@ -267,17 +289,21 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
       const b = e.target.closest('[data-enviar-conteo]');
       if (!b) return;
       for (const [id, t] of timers) { clearTimeout(t); timers.delete(id); await guardar($(`.art-conteo[data-a="${id}"]`, el)); }
-      conOcupado(b, async () => {
-        let r = await llamar('inv_conteo_enviar', { p_conteo: c.id, p_forzar: false });
-        if (!r.ok && r.error === 'faltan') {
-          const lista = r.faltan.slice(0, 12).map((x) => x.nombre).join(', ') + (r.faltan.length > 12 ? '…' : '');
-          if (!await confirmar({ titulo: `Faltan ${r.faltan.length} artículos`, texto: `No contaste: ${lista}. Si los envías así se toman como 0 (no hay). ¿Enviar de todos modos?`, ok: 'Enviar con 0' })) return;
-          r = await llamar('inv_conteo_enviar', { p_conteo: c.id, p_forzar: true });
-        }
+      const faltan = lista.filter((a) => !items[a.id]);
+      const v = ventana(`${AVISO_COBRO}
+        <p class="detalle">Contaste <b>${contados()} de ${lista.length}</b> artículos.</p>
+        ${faltan.length ? `<p class="nota-aviso">Te faltan ${faltan.length}: ${esc(faltan.slice(0, 12).map((a) => a.nombre).join(', '))}${faltan.length > 12 ? '…' : ''}.<br><b>Si los envías así cuentan como 0 (no hay)</b> y saldrían como faltantes.</p>` : ''}
+        <label class="interruptor confirmar-conteo"><input type="checkbox" id="cf-ok"><span>Conté todo <b>dos veces</b> y estoy seguro de que está bien</span></label>
+        <div class="acciones"><button type="button" class="btn grande" data-enviar-ya disabled>Enviar conteo</button>
+          <button type="button" class="btn ghost" data-revisar>Revisar otra vez</button></div>`, { titulo: 'Antes de enviar' });
+      $('#cf-ok', v.el).addEventListener('change', (ev) => { $('[data-enviar-ya]', v.el).disabled = !ev.target.checked; });
+      $('[data-revisar]', v.el).addEventListener('click', () => { v.cerrar(); const f = faltan[0] && $(`.art-conteo[data-a="${faltan[0].id}"]`, el); f?.scrollIntoView({ behavior: 'smooth', block: 'center' }); });
+      $('[data-enviar-ya]', v.el).addEventListener('click', (ev) => conOcupado(ev.currentTarget, async () => {
+        const r = await llamar('inv_conteo_enviar', { p_conteo: c.id, p_forzar: true });
         if (!r.ok) return aviso(msg(r), 'error');
-        aviso('Conteo enviado. ¡Gracias!', 'ok', 4000);
+        v.cerrar(); aviso('Conteo enviado. Gerencia lo revisa. ¡Gracias!', 'ok', 5000);
         vista = 'inicio'; cargar();
-      });
+      }));
     });
   }
 
@@ -341,7 +367,8 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     if (e.target.closest('[data-sol-baja]')) return ventanaSolicitud('baja');
     if (e.target.closest('[data-recargar]')) return cargar();
     if (e.target.closest('[data-recibir]')) return pintarPedido();
-    if (e.target.closest('[data-contar]')) return pintarConteo();
+    const bc = e.target.closest('[data-contar]');
+    if (bc) return conOcupado(bc, iniciarConteo);
     const cb = e.target.closest('[data-cobro]');
     if (cb) verCobro(cb.dataset.cobro);
   });
