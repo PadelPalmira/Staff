@@ -135,7 +135,43 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     badgePend(r.pendientes || 0);
     pintarOffline();
     if (tab === 'inicio' && (!desemp || Date.now() - desempEn > 600000)) cargarDesempeno();
+    if (!plan || Date.now() - planEn > 600000) cargarPlan();
     pintar();
+  }
+  // Calendario: tus próximos turnos y quién está hoy
+  let plan = null, planEn = 0;
+  async function cargarPlan() {
+    planEn = Date.now();
+    const r = await llamar('plan_emp');
+    if (muerto || !r?.ok) return;
+    plan = r;
+    if (tab === 'inicio') { const c = $('#mi-semana', raiz); if (c) c.outerHTML = tarjetaSemana(); }
+  }
+  function tarjetaSemana() {
+    if (!plan?.hay_plan) return '<div id="mi-semana" hidden></div>';
+    const dia = (f) => new Date(`${f}T12:00:00`).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric' });
+    const hoyTxt = (plan.hoy || []).filter((x) => x.quien).map((x) => `${esc(x.nombre)}: ${esc(primerNombre(x.quien))}`).join(' · ');
+    return `<section class="tarjeta" id="mi-semana"><h2>📅 Tu semana</h2>
+      ${plan.mios.length ? `<div class="mi-semana">${plan.mios.map((m) => `<span>${esc(dia(m.fecha))} · ${esc(m.nombre)} ${esc(String(m.inicio).slice(0, 5))}</span>`).join('')}</div>` : '<p class="detalle">No tienes turnos asignados en los próximos 7 días.</p>'}
+      ${hoyTxt ? `<p class="ayuda">Hoy: ${hoyTxt}</p>` : ''}</section>`;
+  }
+  // Cambiar mi PIN (con el PIN actual)
+  function cambiarPin() {
+    const campo = (id, txt) => `<div class="campo"><label for="${id}">${txt}</label><input id="${id}" type="password" inputmode="numeric" maxlength="4" autocomplete="off" pattern="[0-9]*"></div>`;
+    const v = ventana(`<form class="formulario" novalidate>${campo('cp-act', 'PIN actual')}${campo('cp-n1', 'PIN nuevo (4 números)')}${campo('cp-n2', 'Repite el PIN nuevo')}
+      <button class="btn" type="submit">Cambiar PIN</button></form>`, { titulo: 'Cambiar mi PIN' });
+    const f = $('form', v.el);
+    f.addEventListener('submit', (e) => {
+      e.preventDefault();
+      const a = $('#cp-act', f).value, n1 = $('#cp-n1', f).value, n2 = $('#cp-n2', f).value;
+      if (!/^\d{4}$/.test(n1)) return aviso('El PIN nuevo debe ser de 4 números.', 'error');
+      if (n1 !== n2) return aviso('Los dos PIN nuevos no coinciden.', 'error');
+      conOcupado($('button', f), async () => {
+        const r = await llamar('pin_cambiar', { p_actual: a, p_nuevo: n1 });
+        if (!r.ok) return aviso({ pin_incorrecto: 'El PIN actual no es correcto.', pin_invalido: 'El PIN nuevo debe ser de 4 números.', pin_igual: 'El PIN nuevo es igual al actual.' }[r.error] || msg(r), 'error');
+        v.cerrar(); aviso('PIN cambiado. Úsalo la próxima vez que entres.', 'ok', 6000);
+      });
+    });
   }
   async function cargarDesempeno() {
     desempEn = Date.now();
@@ -256,7 +292,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     let h = `<h2 class="saludo">Hola, ${esc(primerNombre(perfil.nombre_completo))}</h2><p class="sub cap">${esc(hoy)}</p>`;
     h += tarjetaRecordatorios();
     if (est.relevo && !est.relevo.leida) h += tarjetaRelevo();
-    if (invEst?.conteo) h += `<section class="tarjeta conteo-pend"><h2>📋 Hoy toca conteo de inventario</h2><p class="detalle">Sin clientes ni tickets abiertos, antes de las ${esc(invEst.conteo.limite)}.</p>
+    if (invEst?.conteo) h += `<section class="tarjeta conteo-pend"><h2>📋 ${invEst.conteo.reconteo ? 'Gerencia pidió un reconteo' : 'Hoy toca conteo de inventario'}</h2><p class="detalle">Antes de las ${esc(invEst.conteo.limite)}. Puedes seguir vendiendo mientras cuentas.</p>
       <button type="button" class="btn" data-ir-inv>Ir a Inventario</button></section>`;
     if (est.dia_cerrado) h += `<p class="nota-aviso">Hoy está marcado como día cerrado${est.motivo_cerrado ? `: ${esc(est.motivo_cerrado)}` : ''}.</p>`;
     for (const c of est.coberturas || []) {
@@ -297,7 +333,9 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     if (est.pendientes) h += `<section class="tarjeta"><div class="enc-avisos"><h2>📌 Pendientes</h2><span class="sub">${est.pendientes}</span></div>
       <p class="detalle">Tienes ${est.pendientes} pendiente${est.pendientes === 1 ? '' : 's'} o incidencia${est.pendientes === 1 ? '' : 's'} abierta${est.pendientes === 1 ? '' : 's'}.</p>
       <button type="button" class="btn ghost" data-ir-pend>Ver pendientes</button></section>`;
+    h += tarjetaSemana();
     h += tarjetaDesempeno();
+    if (!porAdmin) h += '<p class="pie"><button type="button" class="enlace" data-cambiar-pin>🔑 Cambiar mi PIN</button></p>';
     return h;
   }
 
@@ -595,6 +633,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     if (t.closest('[data-ir-tareas]')) return ir('tareas');
     if (t.closest('[data-ir-inicio]')) return ir('inicio');
     if (t.closest('[data-ir-inv]')) return ir('inventario');
+    if (t.closest('[data-cambiar-pin]')) return cambiarPin();
     if (t.closest('[data-ir-pend]')) return ir('pendientes');
     const np = t.closest('[data-nuevo-pend]');
     if (np) { pendInicial = np.dataset.nuevoPend; return ir('pendientes'); }

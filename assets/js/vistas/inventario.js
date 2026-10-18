@@ -1,7 +1,8 @@
-// Inventario para admin y gerencia: Pedidos (verificar), Conteos (iniciar, revisar, cobrar), Loyverse (sincronizar) y Catálogo (+ ajustes).
+// Inventario para admin y gerencia: Pedidos (verificar → se suben solos a Loyverse), Conteos (contra Loyverse en vivo, reconteo, cobro),
+// estado de la conexión con Loyverse (vigilancia de cambios raros) y Catálogo (se actualiza solo; altas/bajas/ajustes directo en Loyverse).
+// Regla: el celular del club nunca escribe en Loyverse; solo gerencia/admin, y todo queda registrado.
 import * as api from '../api.js';
 import { esc, $, $$, aviso, ventana, confirmar, conOcupado, fechaCorta, fechaHora, horaCorta, cantidad, pesos, plural, comprimirEvidencia } from '../ui.js';
-import { leerExportLoyverse, generarImportacion, descargarTexto, leerArchivo } from '../csv.js';
 import { estiloCategoria, miniArticulo, hidratarFotosArticulos } from '../categorias.js';
 
 const ERR = {
@@ -11,9 +12,11 @@ const ERR = {
   export_viejo: 'El export tiene más de 2 horas. Sube uno nuevo para no borrar ventas.', articulo_fuera_export: 'Hay artículos que no vienen en este export de Loyverse.',
   ya_confirmada: 'Esa carga ya se había confirmado.', no_enviado: 'El conteo todavía no se envía.', no_cancelable: 'Ese conteo ya no se puede cancelar.',
   valor_invalido: 'Valor no válido.', factor_invalido: 'La equivalencia debe ser mayor a 0.', perfil_invalido: 'Hay un empleado que ya no existe.',
+  ya_hay_conteo: 'Ya hay un conteo abierto.', no_aplica: 'Ese conteo ya no se puede recontar.', sin_conexion_lv: 'No se pudo conectar con Loyverse. Intenta en unos minutos.',
+  es_reconteo: 'Los reconteos se revisan dentro del conteo original.', falta_nota: 'Escribe qué pasó (mínimo 3 letras).',
 };
 const msg = (r) => ERR[r?.error] || r?.mensaje || 'No se pudo completar. Intenta de nuevo.';
-const COLS_ART = 'id,handle,nombre,categoria,sigue_inventario,tiene_receta,precio,costo,activo,es_insumo,unidad,empaque_nombre,empaque_factor,familia,en_ultimo_export,foto_path,foto_v';
+const COLS_ART = 'id,handle,nombre,categoria,sigue_inventario,tiene_receta,precio,costo,activo,es_insumo,unidad,empaque_nombre,empaque_factor,familia,en_ultimo_export,foto_path,foto_v,lv_stock,lv_minimo,lv_disponible,lv_item_id';
 const contable = (a) => a.activo && a.sigue_inventario && !a.tiene_receta && a.en_ultimo_export;
 const fecha = (d) => fechaCorta(`${d}T12:00:00`);
 const unidadTxt = (a, n) => plural(a?.unidad || 'pieza', n);
@@ -23,19 +26,12 @@ async function rpc(nombre, args) {
   try { return await api.rpc(nombre, args); } catch (e) { return { ok: false, error: e.codigo === 'sin_conexion' ? 'sin_conexion' : 'error', mensaje: e.message }; }
 }
 async function articulos() { return api.seleccionar('inv_articulos', `select=${COLS_ART}&order=categoria.asc.nullslast,nombre.asc`); }
-
-// Subir un export de Loyverse (archivo .csv). Devuelve { export_id, parsed } o null.
-async function subirExport(file, motivo) {
-  let parsed;
-  try { parsed = leerExportLoyverse(await leerArchivo(file)); } catch (e) { aviso(e.message, 'error', 7000); return null; }
-  const r = await rpc('inv_export_subir', {
-    p_motivo: motivo, p_columnas: parsed.columnas, p_tienda: parsed.tienda,
-    p_filas: parsed.filas.map((f) => ({ handle: f.handle, ref: f.ref, nombre: f.nombre, categoria: f.categoria, sigue: f.sigue, receta: f.receta, precio: f.precio, costo: f.costo, stock: f.stock, fila: f.fila })),
-  });
-  if (!r.ok) { aviso(msg(r), 'error'); return null; }
-  return { ...r, parsed };
+// La función "loyverse" del servidor es la única que cambia Loyverse (revisa que seas gerencia/admin).
+async function lv(accion, datos = {}) {
+  try { return await api.funcion(accion, datos, { fn: 'loyverse' }); } catch (e) { return { ok: false, error: 'sin_conexion_lv', mensaje: e.message }; }
 }
-const inputArchivo = (id) => `<label class="btn ghost archivo" for="${id}">📄 Elegir archivo .csv de Loyverse<input id="${id}" type="file" accept=".csv,text/csv"></label>`;
+const haceTxt = (iso) => { if (!iso) return 'nunca'; const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000); return m < 1 ? 'hace un momento' : m < 60 ? `hace ${m} min` : m < 1440 ? `hace ${Math.round(m / 60)} h` : `el ${fechaHora(iso)}`; };
+const signo = (n) => `${Number(n) > 0 ? '+' : ''}${cantidad(n)}`;
 
 export function montarInventario(el, ctx, yo) {
   let seg = api.leerLocal('ppstaff-inv-seg') || 'pedidos';
@@ -56,10 +52,10 @@ export function montarInventario(el, ctx, yo) {
 }
 
 // ================= PEDIDOS (+ subir a Loyverse) =================
-function segPedidosYCarga(el) {
+function segPedidosYCarga(el, yo) {
   el.innerHTML = '<div id="inv-sync"></div><section class="tarjeta por-pedir" id="inv-bajas" hidden></section><div id="inv-peds"></div>';
-  const recargar = () => segPedidosYCarga(el);
-  segLoyverse($('#inv-sync', el), recargar);
+  const recargar = () => segPedidosYCarga(el, yo);
+  segLoyverse($('#inv-sync', el), recargar, yo);
   segBajas($('#inv-bajas', el));
   segPedidos($('#inv-peds', el), recargar);
 }
@@ -69,11 +65,11 @@ async function segBajas(el) {
   const r = await rpc('inv_bajas');
   if (!r.ok || !r.items?.length) { el.hidden = true; return; }
   el.hidden = false;
-  el.innerHTML = `<div class="enc-avisos"><h2>📉 Por pedir (${r.items.length})</h2><span class="sub">export del ${esc(fechaHora(r.subido_en))}</span></div>
-    <p class="ayuda">Según la columna “Existencias bajas” de Loyverse. Para que aparezca un artículo, ponle ese número en Loyverse y sube un export nuevo.</p>
+  el.innerHTML = `<div class="enc-avisos"><h2>📉 Por pedir (${r.items.length})</h2><span class="sub">Loyverse ${esc(haceTxt(r.subido_en))}</span></div>
+    <p class="ayuda">Según “Existencias bajas” de cada artículo en Loyverse. Se actualiza solo.</p>
     <div class="lista">${r.items.map((a) => { const e = estiloCategoria(a.categoria); const q = Number(a.stock || 0) + Number(a.recibido || 0);
       return `<div class="fila inv" style="--cat:${e.color}"><div class="fila-txt"><b>${e.emoji} ${esc(a.nombre)}</b>
-        <span>Quedan <b class="${q <= 0 ? 'mal-txt' : 'warn-txt'}">${esc(cantidad(q))}</b> ${esc(unidadTxt(a, q))} · mínimo ${esc(cantidad(a.minimo))}${Number(a.recibido) ? ` · incluye ${esc(cantidad(a.recibido))} recibidas después del export` : ''}</span></div></div>`; }).join('')}</div>`;
+        <span>Quedan <b class="${q <= 0 ? 'mal-txt' : 'warn-txt'}">${esc(cantidad(q))}</b> ${esc(unidadTxt(a, q))} · mínimo ${esc(cantidad(a.minimo))}${Number(a.recibido) ? ` · incluye ${esc(cantidad(a.recibido))} recibidas que aún no se suben` : ''}</span></div></div>`; }).join('')}</div>`;
 }
 
 async function segPedidos(el, recargar) {
@@ -81,7 +77,7 @@ async function segPedidos(el, recargar) {
   let peds, arts;
   try {
     [peds, arts] = await Promise.all([
-      api.seleccionar('inv_pedidos', 'select=id,creado_en,perfil_nombre,proveedor,nota,ticket_path,estado,comentario,verificado_en,cargado_en,inv_pedido_items(id,articulo_id,nombre_nuevo,cantidad,en_empaques,unidades,quitado)&order=creado_en.desc&limit=60'),
+      api.seleccionar('inv_pedidos', 'select=id,creado_en,perfil_nombre,proveedor,nota,ticket_path,estado,comentario,verificado_en,cargado_en,lv_error,inv_pedido_items(id,articulo_id,nombre_nuevo,cantidad,en_empaques,unidades,quitado,cantidad_original,unidades_original)&order=creado_en.desc&limit=60'),
       articulos(),
     ]);
   } catch (e) { el.innerHTML = `<div class="tarjeta vacio"><p>${esc(e.message)}</p></div>`; return; }
@@ -90,13 +86,13 @@ async function segPedidos(el, recargar) {
   function filaPed(p) {
     const its = p.inv_pedido_items.filter((i) => !i.quitado);
     const nuevos = its.filter((i) => !i.articulo_id).length;
-    const ins = { enviado: '<span class="insignia aviso-i">Por verificar</span>', verificado: '<span class="insignia">Verificado</span>', cargado: '<span class="insignia gris">Cargado</span>', cancelado: '<span class="insignia mal">Cancelado</span>' }[p.estado];
+    const ins = { enviado: '<span class="insignia aviso-i">Por verificar</span>', verificado: `<span class="insignia ${p.lv_error ? 'mal' : ''}">${p.lv_error ? 'Falta subir' : 'Verificado'}</span>`, cargado: '<span class="insignia gris">En Loyverse</span>', cancelado: '<span class="insignia mal">Cancelado</span>' }[p.estado];
     return `<button type="button" class="fila" data-ped="${esc(p.id)}"><div class="fila-txt"><b>${esc(p.perfil_nombre)}${p.proveedor ? ` · ${esc(p.proveedor)}` : ''}</b>
       <span>${esc(fechaHora(p.creado_en))} · ${its.length} artículo${its.length === 1 ? '' : 's'}${nuevos ? ` · <span class="warn-txt">${nuevos} nuevo${nuevos === 1 ? '' : 's'}</span>` : ''}</span></div>${ins}</button>`;
   }
   if (!peds.length) { el.innerHTML = '<h3 class="sub-titulo">Pedidos recibidos</h3><div class="tarjeta vacio"><p><b>Todavía no hay pedidos.</b></p><p>Los empleados los registran desde el celular del club (Inventario > Recibir pedido).</p></div>'; return; }
   el.innerHTML = grupo('Por verificar', peds.filter((p) => p.estado === 'enviado'), '<p class="ayuda">Compara lo capturado contra la foto del ticket.</p>')
-    + grupo('Verificados, por cargar a Loyverse', peds.filter((p) => p.estado === 'verificado'))
+    + grupo('Verificados que faltan subir a Loyverse', peds.filter((p) => p.estado === 'verificado'), '<p class="ayuda">Arriba en “Por aplicar en Loyverse” puedes reintentar.</p>')
     + grupo('Anteriores', peds.filter((p) => p.estado === 'cargado' || p.estado === 'cancelado').slice(0, 20));
   el.onclick = (e) => { const b = e.target.closest('[data-ped]'); if (b) verPedido(peds.find((p) => p.id === b.dataset.ped), arts, mapa, recargar); };
 }
@@ -117,14 +113,16 @@ async function verPedido(p, arts, mapa, alCambiar) {
         return `<div class="fila inv item-ver" data-n="${n}"><div class="fila-txt">
           ${i.articulo_id ? `<b>${esc(a?.nombre || '¿?')}</b>` : `<b class="warn-txt">Nuevo: ${esc(i.nombre_nuevo)}</b>`}
           ${editable && !i.articulo_id ? `<select data-art>${opciones(i.articulo_id)}</select>` : ''}
-          ${!editable ? `<span>${esc(cantidad(i.cantidad))} ${esc(i.en_empaques ? plural(a?.empaque_nombre, i.cantidad) : unidadTxt(a, i.cantidad))} = ${esc(cantidad(i.unidades))} ${esc(unidadTxt(a, i.unidades))}</span>` : ''}</div>
+          ${!editable ? `<span>${esc(cantidad(i.cantidad))} ${esc(i.en_empaques ? plural(a?.empaque_nombre, i.cantidad) : unidadTxt(a, i.cantidad))} = ${esc(cantidad(i.unidades))} ${esc(unidadTxt(a, i.unidades))}</span>` : ''}
+          ${i.id && i.unidades_original != null && Number(i.unidades_original) !== Number(i.unidades) ? `<span class="warn-txt dif-extra">El empleado capturó ${esc(cantidad(i.unidades_original))} ${esc(unidadTxt(a, i.unidades_original))}</span>` : ''}
+          ${!i.id || i.unidades_original == null ? (editable && i.articulo_id ? '<span class="dif-extra">Agregado al verificar</span>' : '') : ''}</div>
           ${editable ? `<div class="cant-ped"><input type="number" inputmode="decimal" min="0" step="any" data-cant value="${esc(i.cantidad)}">
             ${a?.empaque_nombre ? `<select data-modo><option value="1" ${i.en_empaques ? 'selected' : ''}>${esc(plural(a.empaque_nombre, 2))}</option><option value="0" ${!i.en_empaques ? 'selected' : ''}>${esc(unidadTxt(a, 2))}</option></select>` : `<span class="unidad">${esc(unidadTxt(a, 2))}</span>`}
             <button type="button" class="icono-btn" data-quitar aria-label="Quitar">✕</button></div>` : ''}</div>`;
       }).join('')}</div>
       ${editable ? `<div class="campo" style="margin-top:10px"><label for="vp-add">Agregar artículo que faltó capturar</label><select id="vp-add">${opciones(null)}</select></div>
         <div class="campo"><label for="vp-com">Comentario <span class="opc">(lo ve el empleado)</span></label><input id="vp-com" type="text" value="${esc(p.comentario || '')}"></div>
-        <div class="acciones" style="margin-top:12px"><button type="button" class="btn" data-verificar>${p.estado === 'verificado' ? 'Guardar cambios' : 'Verificado: coincide con el ticket'}</button>
+        <div class="acciones" style="margin-top:12px"><button type="button" class="btn" data-verificar>${p.estado === 'verificado' ? 'Guardar y subir a Loyverse' : '✓ Coincide con el ticket: subir a Loyverse'}</button>
           <button type="button" class="btn peligro-suave" data-cancelar>Cancelar pedido</button></div>` : '<div class="acciones"><button type="button" class="btn ghost" data-cerrar>Cerrar</button></div>'}`);
     if (p.ticket_path) api.urlsFotos([{ path: p.ticket_path }], 'tickets').then((m) => {
       const u = m.get(`${p.ticket_path}|`); const t = $('#vp-ticket', v.el);
@@ -148,7 +146,11 @@ async function verPedido(p, arts, mapa, alCambiar) {
       return conOcupado(e.target.closest('[data-verificar]'), async () => {
         const r = await rpc('inv_pedido_verificar', { p_id: p.id, p_items: items, p_comentario: $('#vp-com', v.el).value });
         if (!r.ok) return aviso(msg(r), 'error');
-        v.cerrar(); aviso('Pedido verificado. Se cargará a Loyverse en la próxima sincronización.', 'ok', 5000); alCambiar();
+        const x = await lv('aplicar', { origen: 'pedido', id: p.id });
+        v.cerrar();
+        if (x.ok) aviso(`Pedido verificado y sumado en Loyverse (${x.lineas} artículo${x.lineas === 1 ? '' : 's'}).`, 'ok', 6000);
+        else aviso(`El pedido quedó verificado, pero no se pudo subir a Loyverse: ${msg(x)} Reinténtalo en “Por aplicar en Loyverse”.`, 'error', 9000);
+        alCambiar();
       });
     }
     if (e.target.closest('[data-cancelar]')) {
@@ -172,14 +174,15 @@ async function segConteos(el) {
   let conteos, perfiles, tipos, ajustes;
   try {
     [conteos, perfiles, tipos, ajustes] = await Promise.all([
-      api.seleccionar('inv_conteos', 'select=id,fecha,estado,asignado_tipo,asignado_perfil,contado_por_nombre,iniciado_en,enviado_en,revisado_en,faltante,sobrante,deuda,ajuste_aplicado_en&order=creado_en.desc&limit=20'),
+      api.seleccionar('inv_conteos', 'select=id,fecha,estado,asignado_tipo,asignado_perfil,contado_por_nombre,iniciado_en,enviado_en,revisado_en,faltante,sobrante,deuda,ajuste_aplicado_en,calculo,calculo_error,reconteo_de,articulos&order=creado_en.desc&limit=30'),
       api.rpc('listar_personal').catch(() => []),
       api.seleccionar('tipos_turno', 'select=clave,nombre&activo=eq.true&order=orden.asc'),
       api.seleccionar('ajustes', 'select=clave,valor'),
     ]);
   } catch (e) { el.innerHTML = `<div class="tarjeta vacio"><p>${esc(e.message)}</p></div>`; return; }
   const aj = Object.fromEntries(ajustes.map((a) => [a.clave, a.valor]));
-  const abierto = conteos.find((c) => c.estado === 'abierto');
+  const abierto = conteos.find((c) => c.estado === 'abierto' && !c.reconteo_de);
+  const reabiertos = conteos.filter((c) => c.estado === 'abierto' && c.reconteo_de);
   const asignadoTxt = (c) => (c.asignado_perfil ? (perfiles.find((p) => p.id === c.asignado_perfil)?.nombre_completo || 'empleado') : c.asignado_tipo === 'cualquiera' ? 'cualquier turno' : `turno ${tipos.find((t) => t.clave === c.asignado_tipo)?.nombre || c.asignado_tipo}`);
   let h = '';
   if (abierto) {
@@ -187,36 +190,35 @@ async function segConteos(el) {
       ${abierto.iniciado_en ? `Lo empezó ${esc(abierto.contado_por_nombre || '')} a las ${esc(horaCorta(abierto.iniciado_en))}.` : 'Nadie lo ha empezado.'}</p>
       <button type="button" class="btn peligro-suave" data-cancelar-conteo="${esc(abierto.id)}">Cancelar conteo</button></section>`;
   } else {
-    h += `<section class="tarjeta"><h2>Iniciar conteo</h2>
-      <ol class="pasos"><li>Que no haya clientes ni tickets abiertos.</li><li>En Loyverse: Artículos › Lista de artículos › <b>Exportar</b>.</li><li>Sube aquí ese archivo: con eso se desbloquea el conteo en el celular del club.</li></ol>
+    h += `<section class="tarjeta"><h2>Abrir conteo ahora</h2>
+      <p class="detalle">El conteo se abre solo los días configurados (abajo). Si quieres uno extra, ábrelo aquí: ya no hace falta subir nada de Loyverse; la app compara contra Loyverse en el momento en que se envía y descuenta lo que se venda mientras cuentan.</p>
       <div class="campo"><label for="co-quien">¿Quién cuenta?</label><select id="co-quien">
         ${tipos.map((t) => `<option value="tipo:${esc(t.clave)}" ${t.clave === aj.inv_conteo_turno ? 'selected' : ''}>Quien esté en el turno ${esc(t.nombre)}</option>`).join('')}
         <option value="tipo:cualquiera" ${aj.inv_conteo_turno === 'cualquiera' ? 'selected' : ''}>Cualquier turno abierto</option>
         ${perfiles.map((p) => `<option value="perfil:${esc(p.id)}">${esc(p.nombre_completo)}</option>`).join('')}</select></div>
-      ${inputArchivo('co-archivo')}</section>`;
+      <button type="button" class="btn" data-abrir-conteo>📋 Abrir conteo</button></section>`;
   }
+  for (const r of reabiertos) h += `<section class="tarjeta conteo-pend"><h2>🔁 Reconteo abierto</h2><p class="detalle">${(r.articulos || []).length} artículo${(r.articulos || []).length === 1 ? '' : 's'} · lo hace ${esc(asignadoTxt(r))}.
+      ${r.iniciado_en ? `Lo empezó ${esc(r.contado_por_nombre || '')}.` : 'Nadie lo ha empezado.'}</p><button type="button" class="btn peligro-suave" data-cancelar-conteo="${esc(r.id)}">Cancelar reconteo</button></section>`;
   h += '<h3 class="sub-titulo">Conteos</h3>';
-  h += conteos.filter((c) => c.estado !== 'abierto').length ? `<div class="lista">${conteos.filter((c) => c.estado !== 'abierto').map((c) => {
-    const ins = { enviado: '<span class="insignia aviso-i">Por revisar</span>', revisado: `<span class="insignia ${Number(c.deuda) > 0 ? 'mal' : ''}">${Number(c.deuda) > 0 ? `Debe ${esc(pesos(c.deuda))}` : 'Sin deuda'}</span>`, cancelado: '<span class="insignia gris">Cancelado</span>' }[c.estado] || '';
+  h += conteos.filter((c) => c.estado !== 'abierto' && !c.reconteo_de).length ? `<div class="lista">${conteos.filter((c) => c.estado !== 'abierto' && !c.reconteo_de).map((c) => {
+    const ins = { enviado: c.calculo === 'listo' ? '<span class="insignia aviso-i">Por revisar</span>' : c.calculo === 'error' ? '<span class="insignia mal">Error al calcular</span>' : '<span class="insignia gris">Calculando…</span>', revisado: `<span class="insignia ${Number(c.deuda) > 0 ? 'mal' : ''}">${Number(c.deuda) > 0 ? `Debe ${esc(pesos(c.deuda))}` : 'Sin deuda'}</span>`, cancelado: '<span class="insignia gris">Cancelado</span>' }[c.estado] || '';
     return `<button type="button" class="fila" data-conteo="${esc(c.id)}" ${c.estado === 'cancelado' ? 'disabled' : ''}><div class="fila-txt"><b>Conteo del ${esc(fecha(c.fecha))}</b>
-      <span>${c.contado_por_nombre ? `Contó ${esc(c.contado_por_nombre)}` : ''}${c.enviado_en ? ` · ${esc(fechaHora(c.enviado_en))}` : ''}${c.estado === 'revisado' && !c.ajuste_aplicado_en ? ' · ajuste pendiente en Loyverse' : ''}</span></div>${ins}</button>`;
+      <span>${c.contado_por_nombre ? `Contó ${esc(c.contado_por_nombre)}` : ''}${c.enviado_en ? ` · ${esc(fechaHora(c.enviado_en))}` : ''}${c.estado === 'revisado' && !c.ajuste_aplicado_en ? ' · <span class="warn-txt">falta corregir Loyverse</span>' : c.ajuste_aplicado_en ? ' · Loyverse corregido' : ''}</span></div>${ins}</button>`;
   }).join('')}</div>` : '<p class="detalle">Todavía no hay conteos.</p>';
   h += `<details class="bitacora"><summary>Días y horarios del conteo</summary>${formAjustesConteo(aj, tipos)}</details>`;
   el.innerHTML = h;
   activarAjustes(el, () => segConteos(el));
-  $('#co-archivo', el)?.addEventListener('change', async (e) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    const lbl = e.target.closest('label'); lbl.classList.add('ocupado');
-    try {
-      const sub = await subirExport(f, 'conteo'); if (!sub) return;
-      const [tipo, val] = $('#co-quien', el).value.split(':');
-      const r = await rpc('inv_conteo_crear', { p_export: sub.export_id, p_tipo: tipo === 'tipo' ? val : null, p_perfil: tipo === 'perfil' ? val : null });
-      if (!r.ok) return aviso(msg(r), 'error');
-      aviso(`Conteo desbloqueado (${sub.articulos} artículos${sub.nuevos ? `, ${sub.nuevos} nuevos en el catálogo` : ''}).`, 'ok', 6000);
-      segConteos(el);
-    } finally { lbl.classList.remove('ocupado'); e.target.value = ''; }
-  });
   el.onclick = async (e) => {
+    const ab = e.target.closest('[data-abrir-conteo]');
+    if (ab) {
+      const [tipo, val] = $('#co-quien', el).value.split(':');
+      return conOcupado(ab, async () => {
+        const r = await rpc('inv_conteo_nuevo', { p_tipo: tipo === 'tipo' ? val : null, p_perfil: tipo === 'perfil' ? val : null });
+        if (!r.ok) return aviso(msg(r), 'error');
+        aviso('Conteo abierto: ya aparece en el celular del club.', 'ok', 5000); segConteos(el);
+      });
+    }
     const cc = e.target.closest('[data-cancelar-conteo]');
     if (cc) {
       if (!await confirmar({ titulo: 'Cancelar conteo', texto: 'Se descarta lo que se haya contado. ¿Cancelar?', ok: 'Cancelar conteo', peligro: true })) return;
@@ -252,6 +254,15 @@ async function verConteo(id, alCambiar) {
   const r = await rpc('inv_conteo_resultado', { p_id: id });
   if (!r.ok) { v.poner(`<p class="detalle">${esc(msg(r))}</p>`); return; }
   const c = r.conteo, tol = r.tolerancia_insumos;
+  if (c.calculo !== 'listo') {
+    v.poner(`<p class="detalle">${c.calculo === 'error' ? `<span class="mal-txt">No se pudo comparar con Loyverse: ${esc(c.calculo_error || '')}</span><br>Se reintenta solo cada 10 minutos.`
+      : '⏳ Comparando con Loyverse… tarda uno o dos minutos. Vuelve a abrirlo en un momento.'}</p>
+      <div class="acciones"><button type="button" class="btn ghost" data-cerrar>Cerrar</button></div>`);
+    return;
+  }
+  const recontar = new Set();
+  const [perfiles, tipos] = await Promise.all([api.rpc('listar_personal').catch(() => []), api.seleccionar('tipos_turno', 'select=clave,nombre&activo=eq.true&order=orden.asc').catch(() => [])]);
+  const aplicado = !!c.ajuste_aplicado_en;
   const items = r.items.map((i) => ({ ...i, diferencia: Number(i.diferencia || 0), precio: i.precio == null ? null : Number(i.precio) }));
   const noCobrar = new Map(items.filter((i) => i.no_cobrar).map((i) => [i.articulo_id, i.motivo_no_cobrar || '']));
   const cobrosPrev = new Map((r.cobros || []).map((b) => [b.perfil_id, b]));
@@ -268,15 +279,24 @@ async function verConteo(id, alCambiar) {
   function pintar() {
     const t = totales();
     v.poner(`<p class="detalle" style="margin-top:0">Conteo del ${esc(fecha(c.fecha))} · contó ${esc(c.contado_por_nombre || '¿?')}${c.enviado_en ? ` · ${esc(fechaHora(c.enviado_en))}` : ''}.
-      Esperado = Loyverse al momento del conteo + pedidos que llegaron y aún no se cargaban.</p>
+      Esperado = lo que decía Loyverse al enviar el conteo + lo que se vendió después de contar cada artículo ± pedidos y ajustes que Loyverse aún no tenía.
+      ${aplicado ? `<br><b class="ok-txt">✓ Loyverse ya se corrigió con este conteo (${esc(fechaHora(c.ajuste_aplicado_en))}).</b>` : ''}</p>
+      ${(r.reconteos || []).map((x) => `<p class="nota-info">🔁 Reconteo de ${x.articulos} artículo${x.articulos === 1 ? '' : 's'}: ${x.estado === 'abierto' ? 'esperando que lo hagan' : x.calculo === 'listo' ? `listo (contó ${esc(x.contado_por_nombre || '')}); su resultado ya se usa abajo` : 'calculando…'}</p>`).join('')}
       <div class="cifras tres"><div><b class="mal-txt">${esc(pesos(t.falt))}</b><span>Faltante</span></div><div><b class="ok-txt">${esc(pesos(t.sobr))}</b><span>Sobrante</span></div>
         <div><b>${esc(pesos(t.deuda))}</b><span>Deuda (faltante − sobrante)</span></div></div>
       ${prod.length ? `<h3 class="sub-titulo">Diferencias (a precio de venta)</h3><div class="tabla-dif">${prod.map((i) => `
         <div class="dif-fila ${noCobrar.has(i.articulo_id) ? 'apagada' : ''}" data-art="${esc(i.articulo_id)}">
-          <div class="dif-txt"><b>${esc(i.nombre)}</b><span>Esperado ${esc(cantidad(i.esperado))} · contado ${esc(cantidad(i.contado))}${i.precio == null ? ' · <span class="warn-txt">precio variable: $0</span>' : ''}</span></div>
+          <div class="dif-txt"><b>${esc(i.nombre)}</b><span>Esperado ${esc(cantidad(i.esperado))} · contado ${esc(cantidad(i.contado))}${i.precio == null ? ' · <span class="warn-txt">precio variable: $0</span>' : ''}</span>
+            <span class="dif-extra">Loyverse ${esc(cantidad(i.stock_lv))}${Number(i.vendido_despues) ? ` · vendido después de contarlo ${esc(cantidad(i.vendido_despues))}` : ''}${i.reconteo_contado != null ? ` · <b>reconteo: ${esc(cantidad(i.reconteo_contado))}</b> (antes ${esc(signo(i.diferencia_original))})` : ''}</span></div>
           <div class="dif-num ${i.diferencia < 0 ? 'mal-txt' : 'ok-txt'}"><b>${esc(fmtDif(i))}</b><span>${esc(pesos(Math.abs(i.diferencia) * (i.precio || 0)))}</span></div>
           <label class="no-cobrar"><input type="checkbox" data-nocobrar ${noCobrar.has(i.articulo_id) ? 'checked' : ''}> No cobrar</label>
-        </div>`).join('')}</div>` : '<p class="nota-info">Todo cuadró en los productos. 🎉</p>'}
+          ${aplicado ? '' : `<label class="recontar"><input type="checkbox" data-recontar ${recontar.has(i.articulo_id) ? 'checked' : ''}> Recontar</label>`}
+        </div>`).join('')}</div>
+        ${aplicado ? '' : `<div class="fila-botones" style="margin:8px 0 0"><select id="cv-rq"><option value="tipo:cualquiera">Quien esté en turno</option>
+          ${tipos.map((t) => `<option value="tipo:${esc(t.clave)}">Turno ${esc(t.nombre)}</option>`).join('')}
+          ${perfiles.filter((p) => p.id !== c.contado_por).map((p) => `<option value="perfil:${esc(p.id)}">${esc(p.nombre_completo)}</option>`).join('')}</select>
+          <button type="button" class="btn chico ghost" data-reconteo>🔁 Pedir reconteo de los marcados</button></div>
+          <p class="ayuda">El reconteo es a ciegas (no ven lo esperado). Lo ideal es que lo haga otra persona. Su resultado reemplaza la diferencia de esos artículos.</p>`}` : '<p class="nota-info">Todo cuadró en los productos. 🎉</p>'}
       ${parejas.length ? `<h3 class="sub-titulo">Dónde probablemente se equivocaron</h3><ul class="parejas">${parejas.map((p) => `<li>${p.misma ? '🔁' : '↔︎'} Registraron <b>${esc(p.sobra.nombre)}</b> pero entregaron <b>${esc(p.falta.nombre)}</b>${p.n > 1 ? ` (×${esc(cantidad(p.n))})` : ''}
         <span>${p.dif > 0 ? `faltan ${esc(pesos(p.dif))}` : p.dif < 0 ? `sobran ${esc(pesos(-p.dif))}` : 'mismo precio'}${p.misma ? ' · mismo producto, otro sabor' : ''}</span></li>`).join('')}</ul>` : ''}
       ${ins.length ? `<h3 class="sub-titulo">Insumos (solo reporte, no se cobran · tolerancia ${tol}%)</h3><div class="tabla-dif">${ins.map((i) => {
@@ -285,7 +305,7 @@ async function verConteo(id, alCambiar) {
           <div class="dif-num ${pct > tol ? 'mal-txt' : ''}"><b>${esc(fmtDif(i))}</b><span>${pct > tol ? `fuera de tolerancia (${Math.round(pct)}%)` : `${Math.round(pct)}% · ok`}</span></div></div>`;
       }).join('')}</div>` : ''}
       <h3 class="sub-titulo">Cobro</h3>
-      ${r.desde ? '' : '<p class="nota-aviso">Este es el PRIMER conteo: sirve como línea base (el inventario de Loyverse venía descuadrado). Lo normal es no cobrar nada; al sincronizar, Loyverse queda igual a lo que se contó.</p>'}
+      ${r.desde ? '' : '<p class="nota-aviso">Este es el PRIMER conteo: sirve como línea base (el inventario de Loyverse venía descuadrado). Lo normal es no cobrar nada y luego “Corregir Loyverse” para que quede igual a lo que se contó.</p>'}
       <p class="ayuda">Trabajaron desde el conteo anterior${r.desde ? ` (${esc(fecha(r.desde))})` : ''}. La app sugiere repartir según sus turnos; tú decides.</p>
       <div class="lista" id="cv-cobros">${r.trabajaron.length ? r.trabajaron.map((p) => {
         const prev = cobrosPrev.get(p.perfil_id);
@@ -295,12 +315,14 @@ async function verConteo(id, alCambiar) {
           <select data-via><option value="app" ${prev?.por_app ? 'selected' : ''}>Mandar por la app</option><option value="persona" ${prev && !prev.por_app ? 'selected' : ''}>Lo veo en persona</option></select></div></div>`;
       }).join('') : '<p class="detalle">No hay turnos registrados en ese periodo.</p>'}</div>
       <div class="campo" style="margin-top:10px"><label for="cv-notas">Notas <span class="opc">(internas)</span></label><input id="cv-notas" type="text" value="${esc(c.notas || '')}"></div>
-      <div class="acciones" style="margin-top:12px"><button type="button" class="btn" data-guardar>${c.estado === 'revisado' ? 'Guardar cambios' : 'Guardar revisión'}</button>
-        <p class="ayuda">Al guardar, la diferencia del conteo queda pendiente para la próxima sincronización con Loyverse (así Loyverse queda igual a lo real).</p></div>`);
+      <div class="acciones" style="margin-top:12px">${aplicado ? '' : `<button type="button" class="btn" data-guardar>${c.estado === 'revisado' ? 'Guardar cambios' : 'Guardar revisión'}</button>`}
+        ${c.estado === 'revisado' && !aplicado ? '<button type="button" class="btn ghost" data-corregir-lv>⬆︎ Corregir Loyverse con este conteo</button>' : ''}
+        <p class="ayuda">Corregir Loyverse suma/resta cada diferencia en Loyverse para que quede igual a lo que hay de verdad. Hazlo cuando ya no vayas a pedir reconteos.</p></div>`);
   }
   pintar();
   v.el.addEventListener('change', (e) => {
     const f = e.target.closest('[data-art]');
+    if (f && e.target.matches('[data-recontar]')) { if (e.target.checked) recontar.add(f.dataset.art); else recontar.delete(f.dataset.art); return; }
     if (f && e.target.matches('[data-nocobrar]')) {
       if (e.target.checked) noCobrar.set(f.dataset.art, ''); else noCobrar.delete(f.dataset.art);
       const vals = [...$$('#cv-cobros [data-perfil]', v.el)].map((x) => [x.dataset.perfil, $('[data-monto]', x).value, $('[data-via]', x).value]);
@@ -309,6 +331,27 @@ async function verConteo(id, alCambiar) {
     }
   });
   v.el.addEventListener('click', (e) => {
+    const rq = e.target.closest('[data-reconteo]');
+    if (rq) {
+      if (!recontar.size) return aviso('Marca “Recontar” en los artículos que quieres que vuelvan a contar.', 'error');
+      const [tipo, val] = $('#cv-rq', v.el).value.split(':');
+      return conOcupado(rq, async () => {
+        const x = await rpc('inv_reconteo_pedir', { p_conteo: c.id, p_articulos: [...recontar], p_tipo: tipo === 'tipo' ? val : null, p_perfil: tipo === 'perfil' ? val : null });
+        if (!x.ok) return aviso(msg(x), 'error');
+        v.cerrar(); aviso(`Reconteo pedido (${recontar.size} artículo${recontar.size === 1 ? '' : 's'}). Ya aparece en el celular del club.`, 'ok', 6000); alCambiar();
+      });
+    }
+    const cl = e.target.closest('[data-corregir-lv]');
+    if (cl) {
+      return (async () => {
+        if (!await confirmar({ titulo: 'Corregir Loyverse', texto: 'Se sumará/restará cada diferencia en Loyverse para que quede igual a lo contado. ¿Seguir?', ok: 'Corregir Loyverse' })) return;
+        conOcupado(cl, async () => {
+          const x = await lv('aplicar', { origen: 'conteo', id: c.id });
+          if (!x.ok) return aviso(msg(x), 'error', 7000);
+          v.cerrar(); aviso(`Loyverse corregido (${x.lineas} artículo${x.lineas === 1 ? '' : 's'}).`, 'ok', 6000); alCambiar();
+        });
+      })();
+    }
     const g = e.target.closest('[data-guardar]');
     if (!g) return;
     const cobros = $$('#cv-cobros [data-perfil]', v.el).map((x) => ({ perfil_id: x.dataset.perfil, monto: Number($('[data-monto]', x).value) || 0, por_app: $('[data-via]', x).value === 'app' }));
@@ -325,77 +368,66 @@ async function verConteo(id, alCambiar) {
   });
 }
 
-// ================= LOYVERSE (sincronizar) =================
-async function segLoyverse(el, recargar) {
+// ================= LOYVERSE (conexión, pendientes y vigilancia) =================
+async function segLoyverse(el, recargar, yo) {
   el.innerHTML = '<p class="cargando">Cargando…</p>';
-  let peds, conts, cargas, ajustes, manuales;
-  try {
-    [peds, conts, cargas, ajustes, manuales] = await Promise.all([
-      api.seleccionar('inv_pedidos', 'select=id,estado,perfil_nombre,creado_en&estado=in.(enviado,verificado)'),
-      api.seleccionar('inv_conteos', 'select=id,fecha&estado=eq.revisado&ajuste_aplicado_en=is.null'),
-      api.seleccionar('inv_cargas', 'select=id,creado_en,confirmado_en,pedidos,conteos&order=creado_en.desc&limit=5'),
-      api.seleccionar('ajustes', 'select=clave,valor'),
-      api.seleccionar('inv_ajustes', 'select=id,cantidad,motivo,nota,creado_por_nombre,creado_en,inv_articulos(nombre,unidad)&estado=eq.pendiente&order=creado_en.desc').catch(() => []),
-    ]);
-  } catch (e) { el.innerHTML = `<div class="tarjeta vacio"><p>${esc(e.message)}</p></div>`; return; }
+  const [r, ajustes] = await Promise.all([rpc('lv_panel'), api.seleccionar('ajustes', 'select=clave,valor').catch(() => [])]);
+  if (!r.ok) { el.innerHTML = ''; return; }
   const aj = Object.fromEntries(ajustes.map((a) => [a.clave, a.valor]));
-  const nm = manuales.length;
-  const ver = peds.filter((p) => p.estado === 'verificado').length, sinVer = peds.filter((p) => p.estado === 'enviado').length;
-  const diasTxt = String(aj.inv_carga_dias || '5').split(',').map((d) => ['', 'lunes', 'martes', 'miércoles', 'jueves', 'viernes', 'sábado', 'domingo'][d]).join(' y ');
-  let h = `<section class="tarjeta subir-loyverse ${!ver && !conts.length && !nm ? 'al-dia' : ''}"><h2>⬆︎ Subir pedidos a Loyverse</h2>
-    <p class="detalle">Toca los ${esc(diasTxt)} a las ${esc(aj.inv_carga_hora || '09:00')}. Pendiente: <b>${ver}</b> pedido${ver === 1 ? '' : 's'} verificado${ver === 1 ? '' : 's'}${conts.length ? `, el ajuste de ${conts.length} conteo${conts.length === 1 ? '' : 's'}` : ''}${nm ? ` y ${nm} ajuste${nm === 1 ? '' : 's'} manual${nm === 1 ? '' : 'es'}` : ''}.</p>
-    ${sinVer ? `<p class="nota-aviso">${sinVer} pedido${sinVer === 1 ? '' : 's'} sin verificar no entra${sinVer === 1 ? '' : 'n'} en esta carga. Verifícalos primero (abajo).</p>` : ''}`;
-  if (!ver && !conts.length && !nm) h += '<p class="nota-info">✓ Loyverse está al día: no hay pedidos verificados ni ajustes por subir.</p></section>';
-  else h += `<ol class="pasos"><li>Que no haya clientes ni tickets abiertos (si se vende algo durante estos minutos, Loyverse lo perdería).</li>
-      <li>En Loyverse: Artículos › Lista de artículos › <b>Exportar</b>, y sube aquí ese archivo.</li>
-      <li>Descarga el archivo que genera la app e impórtalo en Loyverse (Artículos › <b>Importar</b>).</li><li>Regresa y toca “Ya lo importé”.</li></ol>
-      ${inputArchivo('ly-archivo')}<div id="ly-res"></div></section>`;
-  if (nm) h += `<details class="bitacora" open><summary>Ajustes manuales por subir (${nm})</summary><div class="lista">${manuales.map((m) => `<div class="fila inv"><div class="fila-txt">
-    <b>${Number(m.cantidad) > 0 ? '+' : ''}${esc(cantidad(m.cantidad))} ${esc(unidadTxt(m.inv_articulos, Math.abs(m.cantidad)))} · ${esc(m.inv_articulos?.nombre || '')}</b>
-    <span>${esc(m.motivo)}${m.nota ? ` · ${esc(m.nota)}` : ''} · ${esc(m.creado_por_nombre || '')} · ${esc(fechaHora(m.creado_en))}</span></div>
-    <button type="button" class="btn chico ghost" data-cancelar-ajuste="${esc(m.id)}">Cancelar</button></div>`).join('')}</div>
-    <p class="ayuda">Se aplican a Loyverse junto con los pedidos en la siguiente subida. También cuentan en el “esperado” del conteo.</p></details>`;
-  h += `<details class="bitacora" ${cargas.some((g) => !g.confirmado_en) ? 'open' : ''}><summary>Últimas subidas a Loyverse</summary>${cargas.length ? `<div class="lista">${cargas.map((g) => `<div class="fila inv"><div class="fila-txt"><b>${esc(fechaHora(g.creado_en))}</b>
-    <span>${g.pedidos.length} pedido${g.pedidos.length === 1 ? '' : 's'}${g.conteos.length ? ` · ajuste de ${g.conteos.length} conteo${g.conteos.length === 1 ? '' : 's'}` : ''}</span></div>
-    ${g.confirmado_en ? '<span class="insignia">Importada</span>' : `<button type="button" class="btn chico ghost" data-confirmar="${esc(g.id)}">Ya lo importé</button>`}</div>`).join('')}</div>` : '<p class="detalle">Todavía no hay subidas.</p>'}</details>`;
-  h += `<details class="bitacora"><summary>Días y hora para subir pedidos</summary>${formAjustesCarga(aj)}</details>`;
+  const min = r.ultima_sync ? (Date.now() - new Date(r.ultima_sync).getTime()) / 60000 : 1e9;
+  const err = r.ultimo_error?.error;
+  const punto = err && min > 25 ? 'mal' : min > 25 ? 'warn' : '';
+  const pend = [
+    ...r.pedidos.map((p) => ({ origen: 'pedido', id: p.id, txt: `Pedido de ${p.perfil_nombre} · ${fechaHora(p.creado_en)}`, error: p.lv_error })),
+    ...r.ajustes.map((m) => ({ origen: 'ajuste', id: m.id, txt: `${signo(m.cantidad)} ${unidadTxt(m, Math.abs(m.cantidad))} · ${m.nombre} (${m.motivo})`, sub: `${m.creado_por_nombre || ''} · ${fechaHora(m.creado_en)}`, cancelar: true })),
+    ...r.conteos.map((c) => ({ origen: 'conteo', id: c.id, txt: `Corregir Loyverse con el conteo del ${fecha(c.fecha)}` })),
+  ];
+  const esAdmin = yo?.rol === 'admin';
+  let h = `<section class="tarjeta"><div class="lv-estado"><span class="lv-punto ${punto}"></span><h2 style="margin:0">Loyverse</h2>
+      <button type="button" class="btn chico ghost" data-sync style="margin-left:auto">↻ Actualizar ahora</button></div>
+    <p class="detalle">${r.ultima_sync ? `Conectado · actualizado ${esc(haceTxt(r.ultima_sync))} · ${r.ligados} artículos` : 'Todavía no se sincroniza.'}
+      ${err ? `<br><span class="${punto ? 'mal-txt' : 'warn-txt'}">Último error: ${esc(err)}</span>` : ''}</p>
+    <p class="ayuda">Catálogo, existencias, ventas y cierres de caja se leen solos cada 10 minutos. Los pedidos verificados, ajustes y correcciones de conteo se suben al momento. El celular del club nunca cambia Loyverse.</p></section>`;
+  if (pend.length) h += `<section class="tarjeta tarjeta-avisos"><h2>⬆︎ Por aplicar en Loyverse (${pend.length})</h2><div class="lista">${pend.map((x) => `<div class="fila inv envolver"><div class="fila-txt"><b>${esc(x.txt)}</b>
+      ${x.sub ? `<span>${esc(x.sub)}</span>` : ''}${x.error ? `<span class="mal-txt">No se pudo subir: ${esc(x.error)}</span>` : ''}</div>
+      <div class="fila-botones" style="margin:0">${x.cancelar ? `<button type="button" class="btn chico ghost" data-cancelar-ajuste="${esc(x.id)}">Cancelar</button>` : ''}
+      <button type="button" class="btn chico" data-aplicar="${esc(x.origen)}:${esc(x.id)}">${x.error ? 'Reintentar' : 'Aplicar'}</button></div></div>`).join('')}</div></section>`;
+  if (r.sin_explicar.length) h += `<section class="tarjeta tarjeta-avisos"><h2>🕵️ Cambios en Loyverse sin explicar (${r.sin_explicar.length})</h2>
+    <p class="ayuda">Existencias que cambiaron directo en Loyverse (no por ventas ni por PP Staff). Puede ser un ajuste hecho a mano en el Back Office… o algo que hay que investigar.</p>
+    <div class="lista">${r.sin_explicar.map((d) => `<div class="fila inv"><div class="fila-txt"><b>${esc(d.nombre)}: <span class="${Number(d.diferencia) < 0 ? 'mal-txt' : 'warn-txt'}">${esc(signo(d.diferencia))}</span></b>
+      <span>Loyverse pasó de ${esc(cantidad(d.antes))} a ${esc(cantidad(d.despues))}; con las ventas debía quedar en ${esc(cantidad(d.esperado))} · entre ${esc(horaCorta(d.desde))} y ${esc(fechaHora(d.hasta))}</span></div>
+      ${esAdmin ? `<button type="button" class="btn chico ghost" data-explicar="${esc(d.id)}">Ya sé qué pasó</button>` : ''}</div>`).join('')}</div></section>`;
+  h += `<details class="bitacora"><summary>Últimos cambios hechos desde PP Staff (${r.movimientos.length})</summary>${r.movimientos.length ? `<div class="lista">${r.movimientos.map((m) => `<div class="fila inv"><div class="fila-txt">
+    <b>${esc(m.nombre)} ${esc(signo(m.cantidad))}</b><span>${esc({ pedido: 'Pedido', ajuste: 'Ajuste', conteo: 'Conteo' }[m.origen])} · ${esc(cantidad(m.antes))} → ${esc(cantidad(m.despues))} · ${esc(m.por_nombre || '')} · ${esc(fechaHora(m.aplicado_en))}</span></div></div>`).join('')}</div>` : '<p class="detalle">Todavía no hay.</p>'}</details>`;
+  h += `<details class="bitacora"><summary>Recordatorio de pedidos sin verificar</summary>${formAjustesCarga(aj)}</details>`;
   el.innerHTML = h;
   activarAjustes(el, recargar);
-  $('#ly-archivo', el)?.addEventListener('change', async (e) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    const lbl = e.target.closest('label'); lbl.classList.add('ocupado');
-    try {
-      const sub = await subirExport(f, 'carga'); if (!sub) return;
-      const r = await rpc('inv_carga_preparar', { p_export: sub.export_id });
-      if (!r.ok) { aviso(msg(r), 'error', 7000); return; }
-      const arts = await articulos();
-      const clave = new Map(arts.map((a) => [a.id, a.handle]));
-      const cambios = new Map(r.lineas.map((l) => [clave.get(l.articulo_id), l.nuevo]));
-      const csv = generarImportacion(sub.parsed, cambios);
-      const nombre = `PPStaff_importar_loyverse_${new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '')}.csv`;
-      $('#ly-res', el).innerHTML = `<h3 class="sub-titulo">Cambios (${r.lineas.length} artículos)</h3><div class="tabla-dif">${r.lineas.map((l) => `<div class="dif-fila"><div class="dif-txt"><b>${esc(l.nombre)}</b>
-        <span>Loyverse ahora ${esc(cantidad(l.stock_export))}${Number(l.pedidos) ? ` · +${esc(cantidad(l.pedidos))} pedidos` : ''}${Number(l.ajuste) ? ` · ${Number(l.ajuste) > 0 ? '+' : ''}${esc(cantidad(l.ajuste))} ajuste` : ''}</span></div>
-        <div class="dif-num"><b>${esc(cantidad(l.nuevo))}</b><span>${esc(unidadTxt(l, l.nuevo))}</span></div></div>`).join('')}</div>
-        <div class="acciones" style="margin-top:12px"><button type="button" class="btn" data-descargar>⬇︎ Descargar archivo para Loyverse</button>
-        <button type="button" class="btn ghost" data-confirmar="${esc(r.carga_id)}">Ya lo importé en Loyverse</button></div>`;
-      $('[data-descargar]', el).onclick = () => descargarTexto(nombre, csv);
-      descargarTexto(nombre, csv);
-    } finally { lbl.classList.remove('ocupado'); e.target.value = ''; }
-  });
   el.onclick = async (e) => {
+    const sy = e.target.closest('[data-sync]');
+    if (sy) return conOcupado(sy, async () => { const x = await lv('sync_ahora'); if (!x.ok) aviso(msg(x), 'error', 7000); else aviso('Loyverse actualizado.', 'ok'); recargar(); });
+    const ap = e.target.closest('[data-aplicar]');
+    if (ap) {
+      const [origen, id] = ap.dataset.aplicar.split(':');
+      return conOcupado(ap, async () => {
+        const x = await lv('aplicar', { origen, id });
+        if (!x.ok) return aviso(msg(x), 'error', 7000);
+        aviso(`Listo: ${x.lineas} artículo${x.lineas === 1 ? '' : 's'} actualizado${x.lineas === 1 ? '' : 's'} en Loyverse.`, 'ok', 5000); recargar();
+      });
+    }
     const ca = e.target.closest('[data-cancelar-ajuste]');
     if (ca) {
-      if (!await confirmar({ titulo: 'Cancelar ajuste', texto: '¿Cancelar este ajuste manual? No se subirá a Loyverse.', ok: 'Cancelar ajuste', peligro: true })) return;
-      return conOcupado(ca, async () => { const r = await rpc('inv_ajuste_cancelar', { p_id: ca.dataset.cancelarAjuste }); if (!r.ok) return aviso(msg(r), 'error'); aviso('Ajuste cancelado.', 'ok'); recargar(); });
+      if (!await confirmar({ titulo: 'Cancelar ajuste', texto: '¿Cancelar este ajuste? No se aplicará en Loyverse.', ok: 'Cancelar ajuste', peligro: true })) return;
+      return conOcupado(ca, async () => { const x = await rpc('inv_ajuste_cancelar', { p_id: ca.dataset.cancelarAjuste }); if (!x.ok) return aviso(msg(x), 'error'); aviso('Ajuste cancelado.', 'ok'); recargar(); });
     }
-    const b = e.target.closest('[data-confirmar]');
-    if (!b) return;
-    if (!await confirmar({ titulo: 'Confirmar importación', texto: '¿Ya importaste el archivo en Loyverse y se aplicó sin errores?', ok: 'Sí, ya está' })) return;
-    conOcupado(b, async () => {
-      const r = await rpc('inv_carga_confirmar', { p_id: b.dataset.confirmar });
-      if (!r.ok) return aviso(msg(r), 'error');
-      aviso('Listo: pedidos marcados como subidos a Loyverse.', 'ok'); recargar();
-    });
+    const ex = e.target.closest('[data-explicar]');
+    if (ex) {
+      const v = ventana(`<form class="formulario" novalidate><div class="campo"><label for="ex-n">¿Qué pasó?</label><input id="ex-n" type="text" placeholder="Ej. lo ajusté yo en el Back Office"></div>
+        <button class="btn" type="submit">Guardar</button></form>`, { titulo: 'Cambio sin explicar' });
+      $('form', v.el).addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        conOcupado($('button', v.el), async () => { const x = await rpc('lv_dif_resolver', { p_id: ex.dataset.explicar, p_nota: $('#ex-n', v.el).value }); if (!x.ok) return aviso(msg(x), 'error'); v.cerrar(); recargar(); });
+      });
+    }
   };
 }
 
@@ -405,13 +437,12 @@ async function segCatalogo(el) {
   let arts;
   try { arts = await articulos(); } catch (e) { el.innerHTML = `<div class="tarjeta vacio"><p>${esc(e.message)}</p></div>`; return; }
   let filtro = '', soloInv = true, catSel = null;
-  const head = `<section class="tarjeta tarjeta-avisos" id="cat-sol" hidden></section><p class="sub">El catálogo se actualiza solo cada vez que se sube un export de Loyverse. Aquí defines empaques (ej. caja = 24 piezas, cartón = 1000 ml), insumos y familias de sabores.</p>
-    ${arts.length ? '' : `<section class="tarjeta"><h2>Crear catálogo</h2><p class="detalle">Sube el export de artículos de Loyverse (Artículos › Exportar).</p>${inputArchivo('cat-archivo')}</section>`}
+  const head = `<section class="tarjeta tarjeta-avisos" id="cat-sol" hidden></section><p class="sub">El catálogo se copia solo de Loyverse cada 10 minutos. Aquí defines empaques (ej. caja = 24 piezas, cartón = 1000 ml), insumos y familias de sabores.</p>
+    <button type="button" class="btn ghost" data-nuevo-lv style="margin-bottom:10px">＋ Artículo nuevo en Loyverse</button>
     <div class="conteo-barra"><input id="cat-buscar" type="text" placeholder="Buscar…" autocomplete="off">
       <label class="interruptor chico"><input type="checkbox" id="cat-solo" checked><span>Solo con inventario</span></label></div>
     <div class="cat-chips" id="cat-chips"></div>
-    <div id="cat-lista"></div>
-    ${arts.length ? `<details class="bitacora"><summary>Actualizar catálogo desde Loyverse</summary><p class="ayuda">Úsalo si diste de alta artículos nuevos en Loyverse.</p>${inputArchivo('cat-archivo')}</details>` : ''}`;
+    <div id="cat-lista"></div>`;
   el.innerHTML = head;
   const lista = $('#cat-lista', el);
   function pintar() {
@@ -423,8 +454,8 @@ async function segCatalogo(el) {
     const cats = catSel ? todas.filter((c) => c === catSel) : todas;
     lista.innerHTML = cats.map((cat) => { const e = estiloCategoria(cat); return `<section class="cat-conteo" style="--cat:${e.color}"><div class="cat-enc"><span class="cat-emoji">${e.emoji}</span><b>${esc(cat)}</b></div><div class="lista">${base.filter((a) => (a.categoria || 'Sin categoría') === cat).map((a) => `
       <button type="button" class="fila art-cat ${contable(a) ? '' : 'apagada'}" data-art="${esc(a.id)}">${miniArticulo(a, 46)}<div class="fila-txt"><b>${esc(a.nombre)}</b>
-      <span>${a.precio != null ? esc(pesos(a.precio)) : 'precio variable'} · ${a.empaque_nombre ? `1 ${esc(a.empaque_nombre)} = ${esc(cantidad(a.empaque_factor))} ${esc(unidadTxt(a, a.empaque_factor))}` : esc(a.unidad)}${a.familia ? ` · familia ${esc(a.familia)}` : ''}</span></div>
-      <div class="fila-ins">${!a.activo ? '<span class="insignia gris">Inactivo</span>' : ''}${a.es_insumo ? '<span class="insignia aviso-i">Insumo</span>' : ''}${a.tiene_receta ? '<span class="insignia gris">Receta</span>' : ''}${!a.en_ultimo_export ? '<span class="insignia mal">Ya no está en Loyverse</span>' : ''}</div></button>`).join('')}</div></section>`; }).join('')
+      <span>${a.lv_stock != null && a.sigue_inventario ? `Loyverse: <b class="${Number(a.lv_stock) <= Number(a.lv_minimo || 0) ? 'warn-txt' : ''}">${esc(cantidad(a.lv_stock))}</b> · ` : ''}${a.precio != null ? esc(pesos(a.precio)) : 'precio variable'} · ${a.empaque_nombre ? `1 ${esc(a.empaque_nombre)} = ${esc(cantidad(a.empaque_factor))} ${esc(unidadTxt(a, a.empaque_factor))}` : esc(a.unidad)}${a.familia ? ` · familia ${esc(a.familia)}` : ''}</span></div>
+      <div class="fila-ins">${!a.activo ? '<span class="insignia gris">Inactivo</span>' : ''}${a.es_insumo ? '<span class="insignia aviso-i">Insumo</span>' : ''}${a.tiene_receta ? '<span class="insignia gris">Receta</span>' : ''}${!a.en_ultimo_export ? '<span class="insignia mal">Ya no está en Loyverse</span>' : a.lv_disponible === false ? '<span class="insignia gris">No se vende</span>' : ''}</div></button>`).join('')}</div></section>`; }).join('')
       || '<p class="detalle">Sin resultados.</p>';
     hidratarFotosArticulos(lista, api);
   }
@@ -433,11 +464,7 @@ async function segCatalogo(el) {
   $('#cat-buscar', el).addEventListener('input', (e) => { filtro = e.target.value.trim().toLowerCase(); pintar(); });
   $('#cat-solo', el).addEventListener('change', (e) => { soloInv = e.target.checked; pintar(); });
   $('#cat-chips', el).addEventListener('click', (e) => { const b = e.target.closest('[data-cat-sel]'); if (b) { catSel = b.dataset.catSel || null; pintar(); } });
-  $$('#cat-archivo', el).forEach((inp) => inp.addEventListener('change', async (e) => {
-    const f = e.target.files?.[0]; if (!f) return;
-    const sub = await subirExport(f, 'catalogo');
-    if (sub) { aviso(`Catálogo actualizado: ${sub.articulos} artículos (${sub.nuevos} nuevos).`, 'ok', 5000); segCatalogo(el); }
-  }));
+  $('[data-nuevo-lv]', el).addEventListener('click', () => ventanaAlta(null, arts, () => segCatalogo(el)));
   lista.addEventListener('click', (e) => {
     const b = e.target.closest('[data-art]'); if (!b) return;
     const a = arts.find((x) => x.id === b.dataset.art);
@@ -453,8 +480,20 @@ async function segCatalogo(el) {
       <p class="ayuda">Ej. Leche: unidad “ml”, empaque “cartón”, 1000. Jamón: unidad “rebanada”, empaque “paquete”, 20. Así el empleado cuenta cartones/paquetes y la app convierte.</p>
       <div class="campo"><label for="ar-fam">Familia <span class="opc">(para detectar cobros de otro sabor)</span></label><input id="ar-fam" type="text" value="${esc(a.familia || '')}" placeholder="Ej. Gatorade 1L"></div>
       <button class="btn" type="submit">Guardar</button>
-      ${contable(a) ? '<button type="button" class="btn ghost" data-ajustar style="margin-top:10px">± Ajustar existencias (sin pedido)</button>' : ''}</form>`, { titulo: a.nombre });
+      ${contable(a) ? '<button type="button" class="btn ghost" data-ajustar style="margin-top:10px">± Ajustar existencias en Loyverse</button>' : ''}
+      ${a.lv_item_id ? (a.lv_disponible === false ? '<button type="button" class="btn ghost" data-reactivar style="margin-top:10px">Volver a ponerlo a la venta en Loyverse</button>'
+        : '<button type="button" class="btn peligro-suave" data-quitar-venta style="margin-top:10px">Ya no se vende: quitarlo de la venta en Loyverse</button>') : ''}</form>`, { titulo: a.nombre });
     $('[data-ajustar]', v.el)?.addEventListener('click', () => { v.cerrar(); ventanaAjuste(a); });
+    v.el.addEventListener('click', async (ev) => {
+      const q = ev.target.closest('[data-quitar-venta],[data-reactivar]'); if (!q) return;
+      const quitar = q.matches('[data-quitar-venta]');
+      if (!await confirmar({ titulo: quitar ? 'Quitar de la venta' : 'Volver a vender', texto: quitar ? `“${a.nombre}” dejará de aparecer en la caja de Loyverse y en el conteo. No se borra (se conserva su historial).` : `“${a.nombre}” vuelve a aparecer en la caja de Loyverse.`, ok: quitar ? 'Quitar' : 'Volver a vender', peligro: quitar })) return;
+      conOcupado(q, async () => {
+        const x = await lv(quitar ? 'baja' : 'reactivar', { articulo_id: a.id });
+        if (!x.ok) return aviso(msg(x), 'error', 7000);
+        v.cerrar(); aviso(quitar ? 'Quitado de la venta en Loyverse.' : 'Otra vez a la venta en Loyverse (actívalo también aquí si se cuenta).', 'ok', 5000); segCatalogo(el);
+      });
+    });
     hidratarFotosArticulos(v.el, api);
     $('#ar-foto', v.el).addEventListener('change', async (ev) => {
       const f = ev.target.files?.[0]; if (!f) return;
@@ -490,7 +529,7 @@ const MOTIVOS_AJUSTE = [['-', 'Merma / caducado'], ['-', 'Roto o dañado'], ['-'
 function ventanaAjuste(a) {
   const emp = !!a.empaque_nombre && Number(a.empaque_factor) > 0;
   const v = ventana(`<form class="formulario" novalidate>
-    <p class="detalle" style="margin-top:0">Para mover existencias de <b>${esc(a.nombre)}</b> sin un pedido. Se sube a Loyverse con la siguiente carga y cuenta en el conteo.</p>
+    <p class="detalle" style="margin-top:0">Para mover existencias de <b>${esc(a.nombre)}</b> sin un pedido (merma, consumo, cortesía…). Se aplica en Loyverse al guardar y queda registrado con tu nombre.</p>
     <div class="campo"><label>¿Entra o sale?</label><div class="chips">
       <label class="chip-sel ancho"><input type="radio" name="aj-sig" value="-1" checked><span>➖ Sale</span></label>
       <label class="chip-sel ancho"><input type="radio" name="aj-sig" value="1"><span>➕ Entra</span></label></div></div>
@@ -498,7 +537,7 @@ function ventanaAjuste(a) {
       <div class="campo"><label for="aj-modo">En</label><select id="aj-modo">${emp ? `<option value="${esc(a.empaque_factor)}">${esc(plural(a.empaque_nombre, 2))}</option>` : ''}<option value="1">${esc(unidadTxt(a, 2))}</option></select></div></div>
     <div class="campo"><label for="aj-mot">Motivo</label><select id="aj-mot">${MOTIVOS_AJUSTE.map(([sg, m]) => `<option data-sig="${sg}">${esc(m)}</option>`).join('')}</select></div>
     <div class="campo"><label for="aj-nota">Nota <span class="opc">(opcional)</span></label><input id="aj-nota" type="text" placeholder="Ej. se cayeron 2 en la bodega"></div>
-    <button class="btn" type="submit">Guardar ajuste</button></form>`, { titulo: 'Ajustar existencias' });
+    <button class="btn" type="submit">Guardar y aplicar en Loyverse</button></form>`, { titulo: 'Ajustar existencias' });
   const f = $('form', v.el);
   $('#aj-mot', f).addEventListener('change', (e) => {
     const sg = e.target.selectedOptions[0].dataset.sig;
@@ -512,7 +551,36 @@ function ventanaAjuste(a) {
     conOcupado($('button[type=submit]', f), async () => {
       const r = await rpc('inv_ajuste_crear', { p_articulo: a.id, p_cantidad: total, p_motivo: $('#aj-mot', f).value, p_nota: $('#aj-nota', f).value });
       if (!r.ok) return aviso(r.error === 'falta_motivo' ? 'Elige el motivo.' : msg(r), 'error');
-      v.cerrar(); aviso(`Ajuste guardado: ${total > 0 ? '+' : ''}${cantidad(total)} ${unidadTxt(a, Math.abs(total))}. Se sube a Loyverse con la siguiente carga.`, 'ok', 6000);
+      const x = await lv('aplicar', { origen: 'ajuste', id: r.id });
+      v.cerrar();
+      if (x.ok) aviso(`Ajuste aplicado en Loyverse: ${total > 0 ? '+' : ''}${cantidad(total)} ${unidadTxt(a, Math.abs(total))}.`, 'ok', 6000);
+      else aviso(`Ajuste guardado, pero no se pudo aplicar en Loyverse: ${msg(x)} Reinténtalo en Pedidos › Por aplicar en Loyverse.`, 'error', 9000);
+    });
+  });
+}
+
+// Crear un artículo en Loyverse (desde una solicitud del personal o directo)
+async function ventanaAlta(sol, arts, alCambiar) {
+  const lista = arts || await articulos().catch(() => []);
+  const cats = [...new Set(lista.filter((a) => a.en_ultimo_export && a.categoria).map((a) => a.categoria))].sort();
+  const v = ventana(`<form class="formulario" novalidate>
+    ${sol ? `<p class="detalle" style="margin-top:0">Lo pidió ${esc(sol.perfil_nombre || '')}${sol.nota ? `: “${esc(sol.nota)}”` : ''}.</p>` : ''}
+    <div class="campo"><label for="al-nom">Nombre (como saldrá en la caja)</label><input id="al-nom" type="text" value="${esc(sol?.nombre || '')}"></div>
+    <div class="campo"><label for="al-cat">Categoría</label><select id="al-cat">${cats.map((c) => `<option ${c === sol?.categoria ? 'selected' : ''}>${esc(c)}</option>`).join('')}<option value="">Sin categoría</option></select></div>
+    <div class="fila-botones" style="margin:0"><div class="campo"><label for="al-pre">Precio de venta</label><input id="al-pre" type="number" inputmode="decimal" min="0" step="any" value="${esc(sol?.precio || '')}" placeholder="vacío = precio variable"></div>
+      <div class="campo"><label for="al-cos">Costo <span class="opc">(opcional)</span></label><input id="al-cos" type="number" inputmode="decimal" min="0" step="any"></div></div>
+    <label class="interruptor"><input type="checkbox" id="al-inv" checked><span>Seguir el inventario (se cuenta y se recibe en pedidos)</span></label>
+    <p class="ayuda">Se crea en Loyverse con existencia 0. Lo que llegue entra con el siguiente pedido recibido.</p>
+    <button class="btn" type="submit">Crear en Loyverse</button></form>`, { titulo: 'Artículo nuevo en Loyverse' });
+  $('form', v.el).addEventListener('submit', (e) => {
+    e.preventDefault();
+    const nombre = $('#al-nom', v.el).value.trim();
+    if (nombre.length < 2) return aviso('Escribe el nombre.', 'error');
+    conOcupado($('button[type=submit]', v.el), async () => {
+      const x = await lv('alta', { solicitud_id: sol?.id || null, nombre, categoria: $('#al-cat', v.el).value, precio: Number($('#al-pre', v.el).value) || null,
+        costo: Number($('#al-cos', v.el).value) || null, sigue: $('#al-inv', v.el).checked });
+      if (!x.ok) return aviso(msg(x), 'error', 7000);
+      v.cerrar(); aviso(`“${nombre}” ya está en Loyverse y en el catálogo.`, 'ok', 5000); alCambiar?.();
     });
   });
 }
@@ -536,21 +604,29 @@ async function pintarSolicitudes(el, alCambiar) {
         <dt>Artículo</dt><dd>${esc(s.nombre)}</dd>${s.categoria ? `<dt>Categoría</dt><dd>${esc(s.categoria)}</dd>` : ''}${s.precio ? `<dt>Precio sugerido</dt><dd>${esc(pesos(s.precio))}</dd>` : ''}
         ${s.nota ? `<dt>Nota</dt><dd>${esc(s.nota)}</dd>` : ''}${s.respuesta ? `<dt>Respuesta</dt><dd>${esc(s.respuesta)}</dd>` : ''}</dl>
       ${s.foto_path ? '<img class="evidencia" id="sol-foto" alt="Foto" hidden>' : ''}
-      <p class="ayuda">${alta ? (s.estado === 'aprobada'
-        ? 'Créalo en Loyverse (Artículos › Agregar) con “Seguir el inventario” activado. Después sube un export en Catálogo y toca “Ya está en Loyverse”.'
-        : 'Si lo apruebas, queda como pendiente “por crear en Loyverse”. Los artículos se dan de alta en Loyverse y llegan a la app con el siguiente export.')
-        : 'Si lo apruebas, el artículo se apaga en la app (ya no se cuenta ni se recibe). En Loyverse desmarca “Disponible para la venta” o bórralo.'}</p>
+      <p class="ayuda">${alta ? 'Al aprobarlo puedes crearlo directo en Loyverse (con precio y categoría) o, si ya lo creaste allá, marcarlo como hecho.'
+        : 'Al aprobarlo se quita de la venta en Loyverse y se apaga en la app (ya no se cuenta ni se recibe). No se borra: se conserva su historial.'}</p>
       <div class="campo"><label for="sol-resp">Respuesta para el empleado <span class="opc">(opcional)</span></label><input id="sol-resp" type="text"></div>
-      <div class="acciones">${s.estado === 'aprobada' ? '<button type="button" class="btn" data-r="hecha">✓ Ya está en Loyverse</button>'
-        : `<button type="button" class="btn" data-r="aprobada">${alta ? 'Aprobar' : 'Aprobar y apagar el artículo'}</button>`}
+      <div class="acciones">${alta ? '<button type="button" class="btn" data-crear-lv>＋ Aprobar y crear en Loyverse</button><button type="button" class="btn ghost" data-r="hecha">Ya lo creé en Loyverse</button>'
+        : '<button type="button" class="btn" data-baja-lv>Aprobar y quitar de la venta</button>'}
         <button type="button" class="btn peligro-suave" data-r="rechazada">Rechazar</button></div>`, { titulo: alta ? 'Artículo nuevo' : 'Quitar artículo' });
     if (s.foto_path) api.urlsFotos([{ path: s.foto_path }], 'evidencias').then((u) => { const im = $('#sol-foto', v.el); const x = u.get(`${s.foto_path}|`); if (im && x) { im.src = x; im.hidden = false; } });
     v.el.addEventListener('click', (ev) => {
+      if (ev.target.closest('[data-crear-lv]')) { v.cerrar(); return ventanaAlta(s, null, alCambiar); }
+      const bj = ev.target.closest('[data-baja-lv]');
+      if (bj) {
+        return conOcupado(bj, async () => {
+          const x = await lv('baja', { articulo_id: s.articulo_id, solicitud_id: s.id });
+          if (!x.ok) return aviso(msg(x), 'error', 7000);
+          await rpc('inv_sol_resolver', { p_id: s.id, p_estado: 'hecha', p_respuesta: $('#sol-resp', v.el).value });
+          v.cerrar(); aviso('Listo: ya no se vende en Loyverse y se apagó en la app.', 'ok', 5000); alCambiar();
+        });
+      }
       const r0 = ev.target.closest('[data-r]'); if (!r0) return;
       conOcupado(r0, async () => {
         const r = await rpc('inv_sol_resolver', { p_id: s.id, p_estado: r0.dataset.r, p_respuesta: $('#sol-resp', v.el).value });
         if (!r.ok) return aviso(msg(r), 'error');
-        v.cerrar(); aviso(r.estado === 'rechazada' ? 'Solicitud rechazada.' : r.estado === 'aprobada' ? 'Aprobada: créalo en Loyverse.' : 'Listo.', 'ok'); alCambiar();
+        v.cerrar(); aviso(r.estado === 'rechazada' ? 'Solicitud rechazada.' : 'Listo.', 'ok'); alCambiar();
       });
     });
   };
@@ -566,7 +642,7 @@ function formAjustesConteo(aj, tipos) {
     <div class="campo"><label>Días de conteo</label>${chipsDias('inv_conteo_dias', aj.inv_conteo_dias)}</div>
     <div class="campo"><label for="aj-turno">Turno que cuenta (por defecto)</label><select id="aj-turno" data-clave="inv_conteo_turno">
       ${tipos.map((t) => `<option value="${esc(t.clave)}" ${aj.inv_conteo_turno === t.clave ? 'selected' : ''}>${esc(t.nombre)}</option>`).join('')}<option value="cualquiera" ${aj.inv_conteo_turno === 'cualquiera' ? 'selected' : ''}>Cualquiera</option></select></div>
-    <div class="fila-botones" style="margin:0"><div class="campo"><label for="aj-av">Aviso si no hay export</label><input id="aj-av" type="time" data-clave="inv_conteo_aviso_hora" value="${esc(aj.inv_conteo_aviso_hora || '09:00')}"></div>
+    <div class="fila-botones" style="margin:0"><div class="campo"><label for="aj-av">Hora en que se abre solo</label><input id="aj-av" type="time" data-clave="inv_conteo_aviso_hora" value="${esc(aj.inv_conteo_aviso_hora || '09:00')}"></div>
       <div class="campo"><label for="aj-lim">Hora límite del conteo</label><input id="aj-lim" type="time" data-clave="inv_conteo_hora_limite" value="${esc(aj.inv_conteo_hora_limite || '15:00')}"></div></div>
     <div class="campo"><label for="aj-max">Avisar si pasan más de estos días sin conteo</label><input id="aj-max" type="number" inputmode="numeric" min="1" max="99" data-clave="inv_conteo_max_dias" value="${esc(aj.inv_conteo_max_dias ?? 10)}"></div>
     <div class="campo"><label for="aj-tol">Tolerancia de insumos (%)</label><input id="aj-tol" type="number" inputmode="numeric" min="0" max="99" data-clave="inv_tolerancia_insumos" value="${esc(aj.inv_tolerancia_insumos ?? 20)}"></div>
@@ -574,8 +650,9 @@ function formAjustesConteo(aj, tipos) {
 }
 function formAjustesCarga(aj) {
   return `<form class="formulario aj-inv" novalidate>
-    <div class="campo"><label>Días de carga a Loyverse</label>${chipsDias('inv_carga_dias', aj.inv_carga_dias)}</div>
-    <div class="campo"><label for="aj-hc">Hora del recordatorio</label><input id="aj-hc" type="time" data-clave="inv_carga_hora" value="${esc(aj.inv_carga_hora || '09:00')}"></div>
+    <p class="ayuda">Si hay pedidos recibidos sin verificar, se le recuerda a gerencia estos días.</p>
+    <div class="campo"><label>Días</label>${chipsDias('inv_carga_dias', aj.inv_carga_dias)}</div>
+    <div class="campo"><label for="aj-hc">Hora del recordatorio (y del aviso “Por pedir”)</label><input id="aj-hc" type="time" data-clave="inv_carga_hora" value="${esc(aj.inv_carga_hora || '09:00')}"></div>
     <button class="btn" type="submit">Guardar</button></form>`;
 }
 function activarAjustes(el, alGuardar) {

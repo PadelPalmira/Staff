@@ -11,14 +11,15 @@ import { esc, $, $$, avatar, hidratarAvatares, aviso, primerNombre, horaCorta, v
 const LLAVE_PIN = 'ppstaff-pin';
 const LLAVE_PERSONAL = 'ppstaff-personal';
 
-export function montarClub(raiz, ctx) {
-  return crearClub(raiz, ctx, { porAdmin: false });
+// modoClub: teléfono de gerencia/admin usado temporalmente como celular del club (plan B). Para salir se cierra la sesión.
+export function montarClub(raiz, ctx, { modoClub = null } = {}) {
+  return crearClub(raiz, ctx, { porAdmin: false, modoClub });
 }
 export function montarComoUsuario(raiz, ctx, { token, perfil }) {
   return crearClub(raiz, ctx, { porAdmin: true, inicial: { token, perfil } });
 }
 
-async function crearClub(raiz, ctx, { porAdmin, inicial }) {
+async function crearClub(raiz, ctx, { porAdmin, inicial, modoClub }) {
   let token = null, perfil = null, minutos = 60, ultimaActividad = Date.now(), ultimoToque = 0, cerrado = false;
   const limpiezas = [];
   ctx.alDesmontar(() => { cerrado = true; limpiezas.forEach((f) => f()); });
@@ -36,12 +37,17 @@ async function crearClub(raiz, ctx, { porAdmin, inicial }) {
 
   // ---------- selector de usuario ----------
   async function pantallaSelector() {
-    raiz.innerHTML = `<main class="pantalla">
+    raiz.innerHTML = `${modoClub ? `<div class="modo-club-barra"><span>📱 Este teléfono funciona como celular del club hasta las ${esc(horaCorta(modoClub))}</span><button type="button" data-salir-modo>Salir</button></div>` : ''}<main class="pantalla">
       <header class="cab-club"><div class="logo-chip chico" aria-hidden="true">PP</div><div><h1>¿Quién eres?</h1><p class="sub">Toca tu nombre</p></div>
         ${porAdmin ? '' : '<button type="button" class="btn-mas" data-pedir aria-label="Pedir un usuario nuevo" title="Pedir un usuario nuevo">＋</button>'}</header>
       <div class="tiles" id="tiles"><p class="cargando">Cargando…</p></div>
       <p class="pie"><a href="#/diagnostico">Diagnóstico</a> · versión ${esc(APP_VERSION)}${porAdmin ? '' : ' · <button type="button" class="enlace" data-push hidden>🔔 Activar avisos en este celular</button>'}</p></main>`;
     $('[data-pedir]', raiz)?.addEventListener('click', ventanaSolicitud);
+    // salir del modo club: se cierra la sesión y hay que volver a entrar con correo y contraseña (así el personal no llega al panel)
+    $('[data-salir-modo]', raiz)?.addEventListener('click', (e) => conOcupado(e.currentTarget, async () => {
+      await api.rpc('modo_club_salir').catch(() => null);
+      await api.salir(); ctx.recargar();
+    }));
     const bp = $('[data-push]', raiz);
     if (bp) {
       estadoPush().then((e) => { if (bp.isConnected) bp.hidden = e === 'activo' || e === 'no_soportado'; });

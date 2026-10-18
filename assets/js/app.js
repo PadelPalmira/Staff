@@ -78,6 +78,7 @@ async function iniciar() {
     return pantallaMensaje({ titulo: 'Cuenta desactivada', texto: 'Tu usuario está desactivado. Habla con el administrador.', boton: 'Salir', alTocar: salir });
   }
   if (perfil.rol === 'dispositivo') return montarClub(raiz, ctx);
+  if (perfil.modo_club_hasta && new Date(perfil.modo_club_hasta) > new Date()) return montarClub(raiz, ctx, { modoClub: perfil.modo_club_hasta });
   if (perfil.rol === 'admin' || perfil.rol === 'gerencia') return montarPanel(raiz, ctx, perfil);
   return pantallaMensaje({ titulo: 'Usa el celular del club', texto: 'Las recepcionistas entran desde el celular del club, tocando su nombre y escribiendo su PIN.', boton: 'Salir', alTocar: salir });
 }

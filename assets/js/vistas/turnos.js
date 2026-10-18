@@ -44,6 +44,28 @@ export async function pintarEnVivo(el) {
 }
 
 // ---------- detalle de un turno ----------
+// Ventas y caja del turno (desde Loyverse)
+const pesosTxt = (n) => `$${Number(n || 0).toLocaleString('es-MX', { minimumFractionDigits: 0, maximumFractionDigits: 2 })}`;
+async function pintarVentas(el, id) {
+  if (!el) return;
+  let r;
+  try { r = await api.rpc('turno_ventas', { p_turno: id }); } catch { return; }
+  if (!r?.ok) return;
+  const cajas = (r.cajas || []).map((c) => {
+    const d = Number(c.diferencia || 0);
+    return `<li>💵 Caja ${esc(c.pos || '')} cerrada a las ${esc(horaCorta(c.cerrado_en))}${c.cerro ? ` por ${esc(c.cerro)}` : ''}: ${Math.abs(d) < 1 ? '<b class="ok-txt">cuadró</b>'
+      : `<b class="mal-txt">${d < 0 ? 'faltaron' : 'sobraron'} ${esc(pesosTxt(Math.abs(d)))}</b>`}</li>`;
+  }).join('');
+  el.innerHTML = `<h3 class="sub-titulo">🧾 Ventas en Loyverse durante el turno</h3>
+    <div class="cifras tres"><div><b>${esc(pesosTxt(r.ventas))}</b><span>${r.tickets} ticket${r.tickets === 1 ? '' : 's'}</span></div>
+      <div><b>${esc(pesosTxt(r.efectivo))}</b><span>Efectivo</span></div>
+      <div><b class="${Number(r.reembolsos) || r.cancelados ? 'warn-txt' : ''}">${esc(pesosTxt(r.reembolsos))}</b><span>Reembolsos${r.cancelados ? ` · ${r.cancelados} cancelado${r.cancelados === 1 ? '' : 's'}` : ''}</span></div></div>
+    ${Number(r.descuentos) ? `<p class="detalle">Descuentos aplicados: ${esc(pesosTxt(r.descuentos))}</p>` : ''}
+    ${cajas ? `<ul class="parejas">${cajas}</ul>` : ''}
+    ${r.top?.length ? `<p class="detalle">Lo más vendido: ${r.top.map((x) => `${esc(x.nombre)} (${Number(x.cantidad)})`).join(', ')}</p>` : ''}
+    <p class="ayuda">Datos de Loyverse${r.sincronizado ? ` · actualizado ${esc(fechaHora(r.sincronizado))}` : ''}.</p>`;
+}
+
 export async function verTurno(id, yo, alCambiar) {
   const v = ventana('<p class="cargando">Cargando…</p>', { titulo: 'Turno' });
   async function pintar() {
@@ -61,7 +83,8 @@ export async function verTurno(id, yo, alCambiar) {
         <dt>Cerró</dt><dd>${t.cierre_auto ? `<span class="mal-txt">No cerró · cierre automático ${esc(fechaHora(t.cerrado_en))}</span>`
           : t.cerrado_en ? `${esc(horaCorta(t.cerrado_en))} · duró ${esc(duracionTexto(r.duracion_min))}${r.cerro_antes_min > 0 ? ` · ${r.cerro_antes_min} min antes` : ''}` : 'Sigue abierto'}</dd>
         ${t.entregado_a_nombre ? `<dt>Cobertura</dt><dd>🔁 ${t.abrio_nombre && t.abrio_nombre !== t.perfil_nombre ? `Lo abrió ${esc(t.abrio_nombre)}; ` : ''}lo cubre ${esc(t.entregado_a_nombre)} desde las ${esc(horaCorta(t.entregado_en))}${t.motivo_entrega ? ` · ${esc(t.motivo_entrega)}` : ''}</dd>` : ''}</dl>
-      ${t.estado === 'abierto' ? '<button type="button" class="btn ghost chico" data-pasar-turno style="margin:4px 0 6px">🔁 Pasar este turno a otra persona</button>' : ''}`;
+      ${t.estado === 'abierto' ? '<button type="button" class="btn ghost chico" data-pasar-turno style="margin:4px 0 6px">🔁 Pasar este turno a otra persona</button>' : ''}
+      <div id="vt-ventas"></div>`;
     for (const [mom, titulo] of [['apertura', 'Al abrir'], ['semanal', 'Semanales'], ['cierre', 'Al cerrar']]) {
       const l = tareas.filter((x) => x.momento === mom);
       if (!l.length) continue;
@@ -86,6 +109,7 @@ export async function verTurno(id, yo, alCambiar) {
     }
     h += '<div class="acciones" style="margin-top:14px"><button type="button" class="btn ghost" data-cerrar>Cerrar</button></div>';
     v.poner(h);
+    pintarVentas($('#vt-ventas', v.el), id);
     const urls = await api.urlsFotos(tareas.filter((x) => x.foto_path).map((x) => ({ path: x.foto_path })), 'evidencias');
     $$('img[data-foto]', v.el).forEach((im) => { const u = urls.get(`${im.dataset.foto}|`); if (u) { im.src = u; im.hidden = false; } });
   }
@@ -145,14 +169,14 @@ async function pasarTurno(turnoId, alListo) {
 export async function montarTurnos(el, ctx, yo) {
   let vista = api.leerLocal('ppstaff-turnos-vista') || 'semana';
   el.innerHTML = `<div class="enc-seccion"><h2>Turnos</h2></div>
-    <div class="segmentos tres" role="tablist"><button type="button" data-vista="semana">Semana</button><button type="button" data-vista="ranking">🏆 Ranking</button><button type="button" data-vista="historial">Historial</button></div>
+    <div class="segmentos cuatro" role="tablist"><button type="button" data-vista="semana">Semana</button><button type="button" data-vista="calendario">📅 Calendario</button><button type="button" data-vista="ranking">🏆 Ranking</button><button type="button" data-vista="historial">Historial</button></div>
     <div id="vista-turnos"></div>`;
   const cont = $('#vista-turnos', el);
   function poner(v) {
     vista = v; api.guardarLocal('ppstaff-turnos-vista', v);
     $$('[data-vista]', el).forEach((b) => b.setAttribute('aria-selected', String(b.dataset.vista === v)));
-    cont.onclick = null;
-    if (v === 'semana') montarSemana(cont, yo); else if (v === 'ranking') montarRanking(cont, yo); else montarHistorial(cont, yo);
+    cont.onclick = null; cont.onchange = null;
+    if (v === 'semana') montarSemana(cont, yo); else if (v === 'calendario') montarCalendario(cont); else if (v === 'ranking') montarRanking(cont, yo); else montarHistorial(cont, yo);
   }
   $('.segmentos', el).addEventListener('click', (e) => { const b = e.target.closest('[data-vista]'); if (b) poner(b.dataset.vista); });
   poner(vista);
@@ -306,4 +330,57 @@ async function montarRanking(el) {
   }
   el.onclick = (e) => { const n = e.target.closest('[data-mes]'); if (n) { mes = moverMes(mes, Number(n.dataset.mes)); cargar(); } };
   cargar();
+}
+
+// ---------- Calendario: quién trabaja cada turno ----------
+const DIAS_SEM = ['', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+export async function montarCalendario(el) {
+  let desde = lunesDe(hoyMx());
+  async function pintar() {
+    el.innerHTML = '<p class="cargando">Cargando…</p>';
+    let r;
+    try { r = await api.rpc('plan_semana', { p_desde: desde }); } catch (e) { el.innerHTML = `<div class="tarjeta vacio"><p>${esc(e.message)}</p></div>`; return; }
+    if (!r.ok) { el.innerHTML = '<div class="tarjeta vacio"><p>No tienes permiso.</p></div>'; return; }
+    const opciones = (sel) => `<option value="">— Nadie / sin asignar —</option>${r.personal.map((p) => `<option value="${esc(p.id)}" ${p.id === sel ? 'selected' : ''}>${esc(p.nombre)}</option>`).join('')}`;
+    const tipoNom = (c) => r.tipos.find((t) => t.clave === c)?.nombre || nombreTipo(c);
+    const hoy = hoyMx();
+    el.innerHTML = `<p class="sub">Quién trabaja cada turno. La app avisa a esa persona si su turno no se abre a tiempo, y cada quien ve su semana en el celular del club.</p>
+      <div class="semana-nav"><button type="button" class="icono-btn" data-sem="-7" aria-label="Semana anterior">‹</button>
+        <b>${esc(fechaLarga(r.desde))} – ${esc(fechaLarga(sumarDias(r.desde, 6)))}</b>
+        <button type="button" class="icono-btn" data-sem="7" aria-label="Semana siguiente">›</button></div>
+      ${r.personal.length ? '' : '<p class="nota-aviso">Todavía no hay recepcionistas dadas de alta.</p>'}
+      <div class="lista calendario">${r.dias.map((d) => `<section class="tarjeta cal-dia ${d.fecha === hoy ? 'hoy' : ''}"><h3 class="cap">${esc(fechaLarga(d.fecha))}${d.cerrado ? ' · <span class="insignia gris">Cerrado</span>' : ''}</h3>
+        ${(d.turnos || []).map((t) => `<div class="cal-turno" data-fecha="${esc(d.fecha)}" data-tipo="${esc(t.tipo)}"><label>${esc(tipoNom(t.tipo))}</label>
+          <select data-plan>${opciones(t.perfil_id)}</select>
+          ${t.cambio ? '<button type="button" class="chip" data-plantilla title="Volver a la plantilla">↺ plantilla</button>' : ''}
+          ${t.real ? `<span class="tarea-meta">${t.real.perfil_nombre ? `Abrió ${esc(t.real.perfil_nombre)}` : ''}${t.real.tarde_min > 0 ? ` · ${t.real.tarde_min} min tarde` : ''}</span>` : ''}</div>`).join('') || '<p class="detalle">Sin turnos ese día.</p>'}</section>`).join('')}</div>
+      <details class="bitacora"><summary>Plantilla semanal (se repite cada semana)</summary>
+        <p class="ayuda">Arriba puedes cambiar un día en particular sin tocar la plantilla.</p>
+        <div class="lista">${[1, 2, 3, 4, 5, 6, 7].map((dow) => { const tps = r.tipos.filter((t) => (t.dias || []).includes(dow)); if (!tps.length) return '';
+          return `<div class="cal-dia"><b>${DIAS_SEM[dow]}</b>${tps.map((t) => `<div class="cal-turno" data-dow="${dow}" data-tipo="${esc(t.clave)}"><label>${esc(t.nombre)}</label>
+            <select data-plantilla-sel>${opciones(r.plantilla.find((x) => x.dow === dow && x.tipo === t.clave)?.perfil_id)}</select></div>`).join('')}</div>`; }).join('')}</div></details>`;
+  }
+  el.onchange = async (e) => {
+    const s = e.target;
+    const f = s.closest('.cal-turno'); if (!f) return;
+    s.disabled = true;
+    try {
+      const r = s.matches('[data-plan]')
+        ? await api.rpc('plan_guardar', { p_fecha: f.dataset.fecha, p_tipo: f.dataset.tipo, p_perfil: s.value || null, p_quitar: false })
+        : await api.rpc('plantilla_guardar', { p_dow: Number(f.dataset.dow), p_tipo: f.dataset.tipo, p_perfil: s.value || null });
+      if (!r.ok) aviso('No se pudo guardar.', 'error'); else aviso('Guardado.', 'ok', 1500);
+      pintar();
+    } catch (err) { aviso(err.message, 'error'); s.disabled = false; }
+  };
+  el.onclick = async (e) => {
+    const n = e.target.closest('[data-sem]');
+    if (n) { desde = sumarDias(desde, Number(n.dataset.sem)); return pintar(); }
+    const b = e.target.closest('[data-plantilla]');
+    if (b) {
+      const f = b.closest('.cal-turno');
+      await api.rpc('plan_guardar', { p_fecha: f.dataset.fecha, p_tipo: f.dataset.tipo, p_perfil: null, p_quitar: true }).catch(() => null);
+      pintar();
+    }
+  };
+  pintar();
 }

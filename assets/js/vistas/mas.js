@@ -36,6 +36,10 @@ async function montarCuenta(el, yo) {
       <dt>Rol</dt><dd>${esc(ROL[yo.rol] || yo.rol)}</dd></dl></section>
     <h3 class="sub-titulo">🔔 Notificaciones en este teléfono</h3>
     <section class="tarjeta" id="mc-push"><p class="cargando">Revisando…</p></section>
+    <h3 class="sub-titulo">📱 Plan B: usar este teléfono como celular del club</h3>
+    <section class="tarjeta"><p class="detalle" style="margin-top:0">Si el celular del club se descompone o se pierde, este teléfono puede funcionar como celular del club por unas horas: los empleados entran con su PIN y no ven nada de gerencia. Para salir se cierra tu sesión y vuelves a entrar con tu contraseña. Al administrador le llega un aviso.</p>
+      <div class="fila-botones" style="margin:0"><select id="mc-horas" aria-label="Duración"><option value="4">4 horas</option><option value="8" selected>8 horas</option><option value="12">12 horas</option></select>
+      <button type="button" class="btn" data-modo-club>Activar modo club</button></div></section>
     <h3 class="sub-titulo">🔑 Cambiar contraseña</h3>
     <form class="tarjeta formulario" id="mc-pass" novalidate>
       ${campoPassword('mc-act', 'Contraseña actual', { auto: 'current-password' })}
@@ -44,6 +48,13 @@ async function montarCuenta(el, yo) {
       <button class="btn" type="submit">Cambiar contraseña</button></form>
     <p class="pie"><a href="#/diagnostico">Diagnóstico</a> · versión ${esc(APP_VERSION)}</p>`;
   activarMostrar(el);
+  $('[data-modo-club]', el).addEventListener('click', (e) => conOcupado(e.currentTarget, async () => {
+    try {
+      const r = await api.rpc('modo_club_activar', { p_horas: Number($('#mc-horas', el).value) });
+      if (!r.ok) return aviso('No se pudo activar.', 'error');
+      location.reload();
+    } catch (err) { aviso(err.message, 'error'); }
+  }));
   const f = $('#mc-pass', el);
   f.addEventListener('submit', (e) => {
     e.preventDefault(); quitarError(f);

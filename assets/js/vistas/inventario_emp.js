@@ -16,6 +16,7 @@ const unidadTxt = (a, n) => plural(a.unidad || 'pieza', n);
 
 export function montarInventarioEmp(cont, { llamar, alCambio }) {
   let est = null, vista = 'inicio', muerto = false;
+  const listaConteo = (c) => (c?.articulos ? est.catalogo.filter((a) => c.articulos.includes(a.id)) : est.catalogo);
   const raiz = document.createElement('div');
   cont.innerHTML = ''; cont.appendChild(raiz);
   raiz.innerHTML = '<p class="cargando">Cargando inventario…</p>';
@@ -36,9 +37,9 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     const c = est.conteo, sinVer = est.cobros.filter((b) => !b.visto_en);
     let h = '<h2 class="saludo">Inventario</h2>';
     if (c) {
-      const hechos = Object.keys(c.items).length, total = est.catalogo.length;
-      h += `<section class="tarjeta conteo-pend"><h2>📋 Conteo de inventario</h2>
-        <p class="detalle">Cuenta todo lo que hay, sin clientes y sin tickets abiertos. Tienes hasta las ${esc(c.limite)}.</p>
+      const hechos = Object.keys(c.items).length, total = listaConteo(c).length;
+      h += `<section class="tarjeta conteo-pend"><h2>📋 ${c.reconteo ? 'Reconteo' : 'Conteo de inventario'}</h2>
+        <p class="detalle">${c.reconteo ? `Gerencia pide volver a contar ${total} artículo${total === 1 ? '' : 's'}.` : 'Cuenta todo lo que hay.'} Puedes seguir vendiendo mientras cuentas: la app descuenta sola lo que se venda. Tienes hasta las ${esc(c.limite)}.</p>
         <div class="progreso"><span style="width:${total ? Math.round((hechos / total) * 100) : 0}%"></span></div>
         <p class="detalle">${hechos} de ${total} artículos contados</p>
         <button type="button" class="btn grande" data-contar>${hechos ? 'Seguir contando' : 'Empezar conteo'}</button></section>`;
@@ -204,14 +205,15 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     const c = est.conteo;
     if (!c) return pintarInicio();
     const items = { ...c.items };
-    const cats = [...new Set(est.catalogo.map((a) => a.categoria || 'Sin categoría'))];
+    const lista = listaConteo(c);
+    const cats = [...new Set(lista.map((a) => a.categoria || 'Sin categoría'))];
     const contados = () => Object.keys(items).length;
-    el.innerHTML = `<div class="enc-seccion"><h2>Conteo</h2><button type="button" class="enlace" data-volver>Salir</button></div>
-      <p class="nota-aviso">Sin clientes y sin tickets abiertos. Cuenta lo que hay físicamente; no importa lo que diga el sistema.</p>
+    el.innerHTML = `<div class="enc-seccion"><h2>${c.reconteo ? 'Reconteo' : 'Conteo'}</h2><button type="button" class="enlace" data-volver>Salir</button></div>
+      <p class="nota-aviso">Cuenta lo que hay físicamente, artículo por artículo. Si vendes algo, cóbralo en Loyverse en ese momento (no dejes tickets abiertos).</p>
       <div class="conteo-barra"><input id="co-buscar" type="text" placeholder="Buscar artículo…" autocomplete="off"><b id="co-prog"></b></div>
       <div class="cat-chips" role="navigation" aria-label="Categorías">${cats.map((cat) => { const e = estiloCategoria(cat); return `<button type="button" class="cat-chip" style="--cat:${e.color}" data-ir-cat="${esc(cat)}"><span>${e.emoji}</span>${esc(cat)}<i data-cat-prog="${esc(cat)}"></i></button>`; }).join('')}</div>
       ${cats.map((cat) => { const e = estiloCategoria(cat); return `<section class="cat-conteo" style="--cat:${e.color}" data-cat="${esc(cat)}"><div class="cat-enc"><span class="cat-emoji">${e.emoji}</span><b>${esc(cat)}</b><i data-cat-prog="${esc(cat)}"></i></div><div class="lista">
-        ${est.catalogo.filter((a) => (a.categoria || 'Sin categoría') === cat).map((a) => {
+        ${lista.filter((a) => (a.categoria || 'Sin categoría') === cat).map((a) => {
           const v = items[a.id];
           const emp = tieneEmpaque(a);
           return `<div class="fila inv art-conteo ${v ? 'contado' : ''}" data-a="${esc(a.id)}" data-nombre="${esc(a.nombre.toLowerCase())}">
@@ -222,9 +224,9 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
         }).join('')}</div></section>`; }).join('')}
       <button type="button" class="btn grande" data-enviar-conteo>Enviar conteo</button>`;
     const prog = () => {
-      $('#co-prog', el).textContent = `${contados()} / ${est.catalogo.length}`;
+      $('#co-prog', el).textContent = `${contados()} / ${lista.length}`;
       for (const cat of cats) {
-        const arts = est.catalogo.filter((a) => (a.categoria || 'Sin categoría') === cat);
+        const arts = lista.filter((a) => (a.categoria || 'Sin categoría') === cat);
         const n = arts.filter((a) => items[a.id]).length;
         $$(`[data-cat-prog="${CSS.escape(cat)}"]`, el).forEach((pc) => { pc.textContent = `${n}/${arts.length}`; pc.closest('.cat-chip, .cat-enc')?.classList.toggle('completa', n === arts.length); });
       }
@@ -245,7 +247,7 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     el.addEventListener('focusout', (e) => { const f = e.target.closest?.('.art-conteo'); if (f && timers.has(f.dataset.a)) { clearTimeout(timers.get(f.dataset.a)); timers.delete(f.dataset.a); guardar(f); } });
     async function guardar(f) {
       timers.delete(f.dataset.a);
-      const a = est.catalogo.find((x) => x.id === f.dataset.a);
+      const a = lista.find((x) => x.id === f.dataset.a);
       const ve = $('[data-emp]', f)?.value ?? '', vs = $('[data-suel]', f).value;
       const emp = ve === '' ? null : Number(ve), sue = vs === '' ? null : Number(vs);
       if ((emp != null && emp < 0) || (sue != null && sue < 0)) return aviso('No se permiten números negativos.', 'error');

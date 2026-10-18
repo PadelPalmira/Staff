@@ -477,3 +477,26 @@ img.evidencia.previa-mini{width:72px;height:72px;object-fit:cover;margin:0;borde
 .cobertura{border-color:rgba(56,189,248,.5);background:linear-gradient(160deg,rgba(56,189,248,.12),transparent 70%),var(--surface)}
 .cobertura .btn{margin-top:10px}
 .btn.ghost.chico[data-tomar]{display:flex;width:100%}
+
+/* ---------- 0.10: calendario, Loyverse ---------- */
+.semana-nav{display:flex;align-items:center;justify-content:space-between;gap:8px;margin:6px 0 12px}
+.semana-nav b{font-size:14px;text-align:center;text-transform:capitalize}
+.calendario{gap:10px}
+.cal-dia h3{margin:0 0 8px;font-size:15px}
+.cal-dia.hoy{outline:2px solid var(--acento,#00c2bb)}
+.cal-turno{display:grid;grid-template-columns:90px 1fr auto;align-items:center;gap:6px 8px;margin:6px 0}
+.cal-turno label{font-weight:600;font-size:13px}
+.cal-turno select{min-width:0}
+.cal-turno .tarea-meta{grid-column:2 / -1}
+.lv-estado{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.lv-punto{width:10px;height:10px;border-radius:50%;background:#10b981;display:inline-block}
+.lv-punto.mal{background:#ef4444}.lv-punto.warn{background:#f59e0b}
+.mi-semana{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.mi-semana span{padding:4px 10px;border-radius:999px;background:rgba(0,194,187,.14);font-size:13px}
+.recontar{display:flex;align-items:center;gap:6px;font-size:13px}
+.dif-fila .dif-extra{font-size:12px;opacity:.75}
+.modo-club-barra{position:sticky;top:0;z-index:30;background:#7c3aed;color:#fff;padding:8px 12px;font-size:13px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+.modo-club-barra button{background:rgba(255,255,255,.2);color:#fff;border:0;border-radius:8px;padding:6px 10px;font-weight:600}
+
+.fila.envolver{flex-wrap:wrap}.fila.envolver .fila-txt{flex:1 1 180px}.fila.envolver .fila-txt b,.fila.envolver .fila-txt span{white-space:normal;overflow:visible;text-overflow:clip}
+.fila.envolver .fila-botones{margin-left:auto!important}

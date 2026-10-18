@@ -1,4 +1,4 @@
-// Ajustes (solo administrador): horarios de turnos, días cerrados, alertas, correo de prueba y limpieza de fotos.
+// Ajustes (solo administrador): arranque, horarios de turnos, días cerrados, alertas, correos (al momento o resumen diario), token de Loyverse y limpieza de fotos.
 import * as api from '../api.js';
 import { esc, $, $$, aviso, ventana, confirmar, conOcupado } from '../ui.js';
 import { hoyMx } from './turnos.js';
@@ -10,6 +10,10 @@ const fechaLarga = (f) => new Date(`${f}T12:00:00`).toLocaleDateString('es-MX', 
 
 export async function montarAjustes(el) {
   el.innerHTML = `<div class="enc-seccion"><h2>Ajustes</h2></div>
+    <h3 class="sub-titulo">🚀 Fecha de arranque</h3>
+    <form class="tarjeta formulario" id="aj-arranque" novalidate><p class="detalle" style="margin-top:0">Lo que pase antes de esta fecha se toma como prueba: no cuenta para el ranking, rachas ni resúmenes, y no se mandan avisos de turnos ni tareas. Déjala vacía para que todo cuente.</p>
+      <div class="campo"><label for="ar-fecha">Empezar a contar desde</label><input id="ar-fecha" type="date"></div>
+      <button class="btn" type="submit">Guardar</button></form>
     <h3 class="sub-titulo">Horarios de los turnos</h3><div id="aj-turnos" class="lista"><p class="cargando">Cargando…</p></div>
     <div class="enc-seccion" style="margin-top:22px"><h3 class="sub-titulo" style="margin:0">Días cerrados</h3><button type="button" class="btn chico" data-nuevo-dia>＋ Agregar</button></div>
     <p class="ayuda">En un día cerrado (feriado, mantenimiento…) la app avisa al empleado antes de abrir turno. No bloquea nada.</p>
@@ -17,8 +21,19 @@ export async function montarAjustes(el) {
     <h3 class="sub-titulo">Alertas automáticas</h3>
     <form class="tarjeta formulario" id="aj-alertas" novalidate><p class="cargando">Cargando…</p></form>
     <h3 class="sub-titulo">Correos</h3>
-    <section class="tarjeta"><p class="detalle" style="margin-top:0">Las invitaciones y avisos se mandan desde Gmail. Manda una prueba a tu correo para confirmar que funciona.</p>
-      <button type="button" class="btn ghost" data-probar-correo>Enviar correo de prueba</button></section>
+    <form class="tarjeta formulario" id="aj-correo" novalidate>
+      <div class="campo"><label>¿Cuándo mandar los avisos?</label><div class="chips">
+        <label class="chip-sel ancho"><input type="radio" name="cm" value="inmediato"><span>Al momento</span></label>
+        <label class="chip-sel ancho"><input type="radio" name="cm" value="resumen"><span>Un resumen al día</span></label></div>
+        <p class="ayuda">Con “resumen”, lo urgente llega igual al momento (turno sin abrir o sin cerrar, incidencias, descuadres de caja, reembolsos, cambios raros en Loyverse…). Lo demás llega junto en un solo correo.</p></div>
+      <div class="campo"><label for="cm-hora">Hora del resumen</label><input id="cm-hora" type="time"></div>
+      <button class="btn" type="submit">Guardar</button>
+      <p class="detalle">Las invitaciones y avisos se mandan desde Gmail. Manda una prueba a tu correo para confirmar que funciona.</p>
+      <button type="button" class="btn ghost" data-probar-correo>Enviar correo de prueba</button></form>
+    <h3 class="sub-titulo">🔗 Loyverse</h3>
+    <form class="tarjeta formulario" id="aj-lv" novalidate><p class="detalle" style="margin-top:0">La llave (token) de Loyverse se guarda cifrada en el servidor: no queda en ningún teléfono. Si la cambias en Loyverse (Back Office › Access tokens), pega aquí la nueva y borra la vieja allá.</p>
+      <div class="campo"><label for="lv-tk">Token nuevo</label><input id="lv-tk" type="password" autocomplete="off" placeholder="Pega aquí el token"></div>
+      <button class="btn" type="submit">Probar y guardar token</button></form>
     <h3 class="sub-titulo">Fotos</h3>
     <section class="tarjeta"><p class="detalle" style="margin-top:0">Las fotos viejas se borran solas cada madrugada según los días de arriba (así no se llena el espacio gratis de Supabase: 1 GB).</p>
       <button type="button" class="btn ghost" data-limpiar>Borrar fotos viejas ahora</button></section>`;
@@ -120,6 +135,36 @@ export async function montarAjustes(el) {
     });
   });
   cargarAlertas();
+
+  // ---------- arranque, correo y Loyverse ----------
+  const fAr = $('#aj-arranque', el), fCo = $('#aj-correo', el), fLv = $('#aj-lv', el);
+  async function cargarGenerales() {
+    const filas = await api.seleccionar('ajustes', 'select=clave,valor').catch(() => []);
+    const v = Object.fromEntries(filas.map((f) => [f.clave, f.valor]));
+    $('#ar-fecha', fAr).value = typeof v.fecha_arranque === 'string' ? v.fecha_arranque : '';
+    const modo = v.correo_modo === 'resumen' ? 'resumen' : 'inmediato';
+    $(`input[name=cm][value=${modo}]`, fCo).checked = true;
+    $('#cm-hora', fCo).value = v.correo_resumen_hora || '20:00';
+  }
+  const guardarGeneral = async (clave, valor) => { const r = await api.rpc('ajuste_general_guardar', { p_clave: clave, p_valor: valor }); if (!r.ok) throw new Error('Valor no válido.'); };
+  fAr.addEventListener('submit', (e) => { e.preventDefault(); conOcupado($('button', fAr), async () => {
+    try { await guardarGeneral('fecha_arranque', $('#ar-fecha', fAr).value); aviso('Fecha de arranque guardada.', 'ok'); } catch (err) { aviso(err.message, 'error'); }
+  }); });
+  fCo.addEventListener('submit', (e) => { e.preventDefault(); conOcupado($('button[type=submit]', fCo), async () => {
+    try {
+      await guardarGeneral('correo_modo', $('input[name=cm]:checked', fCo)?.value || 'inmediato');
+      await guardarGeneral('correo_resumen_hora', $('#cm-hora', fCo).value || '20:00');
+      aviso('Guardado.', 'ok');
+    } catch (err) { aviso(err.message, 'error'); }
+  }); });
+  fLv.addEventListener('submit', (e) => { e.preventDefault(); conOcupado($('button', fLv), async () => {
+    const tk = $('#lv-tk', fLv).value.trim();
+    if (!tk) return aviso('Pega el token.', 'error');
+    const r = await api.funcion('token', { token: tk }, { fn: 'loyverse' }).catch((err) => ({ ok: false, mensaje: err.message }));
+    if (!r.ok) return aviso(r.mensaje || 'No se pudo guardar.', 'error', 7000);
+    $('#lv-tk', fLv).value = ''; aviso('Token de Loyverse guardado. Ya puedes borrar el anterior en Loyverse.', 'ok', 7000);
+  }); });
+  cargarGenerales();
 
   cTurnos.addEventListener('click', (e) => { const b = e.target.closest('[data-clave]'); if (b) editarTurno(tipos.find((t) => t.clave === b.dataset.clave)); });
   $('[data-nuevo-dia]', el).addEventListener('click', nuevoDia);
