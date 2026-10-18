@@ -268,24 +268,33 @@ async function montarSemana(el, yo) {
 
 // ---------- avisos para gerencia y admin ----------
 export async function contarAvisos() {
-  const l = await api.seleccionar('notificaciones', 'select=id&vista=eq.false&anulada=eq.false&limit=50');
-  return l.length;
+  const l = await api.seleccionar('notificaciones', 'select=tipo&vista=eq.false&anulada=eq.false&limit=200');
+  return new Set(l.map((n) => n.tipo)).size; // un número por tipo de aviso (los repetidos se agrupan)
 }
+// Avisos sin ver, agrupados por tipo: se muestra el más reciente y cuántos más hay iguales.
 export async function pintarAvisos(el, yo, alCambiar) {
   let l;
-  try { l = await api.seleccionar('notificaciones', 'select=id,creada_en,titulo,detalle,perfil_nombre,turno_id&vista=eq.false&anulada=eq.false&order=creada_en.desc&limit=30'); }
+  try { l = await api.seleccionar('notificaciones', 'select=id,tipo,creada_en,titulo,detalle,perfil_nombre,turno_id&vista=eq.false&anulada=eq.false&order=creada_en.desc&limit=200'); }
   catch { return; }
   el.hidden = !l.length;
   if (!l.length) { el.innerHTML = ''; return; }
-  el.innerHTML = `<div class="enc-avisos"><h2>⚠ Avisos (${l.length})</h2><button type="button" class="enlace" data-todo-visto>Marcar todo visto</button></div>
-    <div class="lista">${l.map((n) => `<div class="fila aviso-fila" data-n="${esc(n.id)}"><div class="fila-txt" data-ver-turno="${esc(n.turno_id || '')}">
-      <b>${esc(n.titulo)}</b><span>${esc(n.perfil_nombre || '')} · ${esc(fechaHora(n.creada_en))}${n.detalle ? ` · “${esc(n.detalle)}”` : ''}</span></div>
-      <button type="button" class="btn chico ghost" data-visto>Visto</button></div>`).join('')}</div>`;
+  const grupos = new Map();
+  for (const n of l) { const g = grupos.get(n.tipo); if (g) g.mas++; else grupos.set(n.tipo, { n, mas: 0 }); }
+  const lista = [...grupos.values()].slice(0, 15);
+  el.innerHTML = `<div class="enc-avisos"><h2>⚠ Avisos (${grupos.size})</h2><button type="button" class="enlace" data-todo-visto>Marcar todo visto</button></div>
+    <div class="lista">${lista.map(({ n, mas }) => `<div class="fila aviso-fila" data-n="${esc(n.id)}" data-tipo="${esc(n.tipo)}" data-mas="${mas}"><div class="fila-txt" data-ver-turno="${esc(n.turno_id || '')}">
+      <b>${esc(n.titulo)}${mas ? ` <span class="insignia gris">+${mas} igual${mas === 1 ? '' : 'es'}</span>` : ''}</b>
+      <span>${n.perfil_nombre ? `${esc(n.perfil_nombre)} · ` : ''}${esc(fechaHora(n.creada_en))}${n.detalle ? ` · “${esc(n.detalle.length > 220 ? `${n.detalle.slice(0, 220)}…` : n.detalle)}”` : ''}</span></div>
+      <button type="button" class="btn chico ghost" data-visto>${mas ? 'Vistos' : 'Visto'}</button></div>`).join('')}</div>`;
   el.onclick = async (e) => {
     const todo = e.target.closest('[data-todo-visto]');
     const f = e.target.closest('[data-n]');
     if (todo) { await api.rpc('notificacion_vista', { p_id: null }).catch(() => null); return alCambiar(); }
-    if (f && e.target.closest('[data-visto]')) { await api.rpc('notificacion_vista', { p_id: f.dataset.n }).catch(() => null); return alCambiar(); }
+    if (f && e.target.closest('[data-visto]')) {
+      if (Number(f.dataset.mas) > 0) await api.rpc('notificacion_vista_tipo', { p_tipo: f.dataset.tipo }).catch(() => null);
+      else await api.rpc('notificacion_vista', { p_id: f.dataset.n }).catch(() => null);
+      return alCambiar();
+    }
     const vt = e.target.closest('[data-ver-turno]');
     if (vt && vt.dataset.verTurno) verTurno(vt.dataset.verTurno, yo, alCambiar);
   };
