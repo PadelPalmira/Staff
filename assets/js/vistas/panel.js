@@ -25,7 +25,7 @@ export function montarPanel(raiz, ctx, yo) {
     </header>
     <main class="contenido" id="contenido"></main>
     <nav class="tabs" aria-label="Secciones">${tabs.map(([id, txt, ico]) =>
-      `<button type="button" data-tab="${id}" aria-current="${id === actual}"><span aria-hidden="true">${ico}</span>${txt}${id === 'mas' ? '<i class="punto-aviso" data-badge hidden></i>' : ''}${id === 'inicio' ? '<i class="punto-aviso amarillo" data-badge-avisos hidden></i>' : ''}${id === 'pendientes' ? '<i class="punto-aviso amarillo" data-badge-pend hidden></i>' : ''}</button>`).join('')}</nav>
+      `<button type="button" data-tab="${id}" aria-current="${id === actual}"><span aria-hidden="true">${ico}</span>${txt}${id === 'mas' ? '<i class="punto-aviso" data-badge hidden></i>' : ''}${id === 'inicio' ? '<i class="punto-aviso amarillo" data-badge-avisos hidden></i>' : ''}${id === 'pendientes' ? '<i class="punto-aviso amarillo" data-badge-pend hidden></i>' : ''}${id === 'inventario' ? '<i class="punto-aviso amarillo" data-badge-inv hidden></i>' : ''}</button>`).join('')}</nav>
   </div>`;
   hidratarAvatares(raiz);
   $('[data-salir]', raiz).addEventListener('click', async () => { await api.salir(); api.guardarLocal(LLAVE_TAB, null); ctx.recargar(); });
@@ -81,13 +81,22 @@ export function montarPanel(raiz, ctx, yo) {
   }
   // Minutos de uso (reporte de actividad de gerencia): un aviso por minuto mientras la app está en pantalla
   const ping = () => { if (document.visibilityState === 'visible') api.rpc('actividad_ping').catch(() => null); };
-  const relojAvisos = setInterval(() => { revisarAvisos(); revisarPendientes(); }, 30000);
+  async function revisarInventario() {
+    if (document.visibilityState !== 'visible') return;
+    try {
+      const r = await api.rpc('gestion_por_hacer');
+      const n = ['pedidos_verificar', 'lv_aplicar', 'conteos_revisar', 'sol_articulos', 'lv_sin_explicar'].reduce((s, k) => s + (Number(r?.[k]) || 0), 0);
+      const b = $('[data-badge-inv]', raiz);
+      if (b) { b.hidden = !n; b.textContent = n ? String(n) : ''; }
+    } catch { /* sin internet */ }
+  }
+  const relojAvisos = setInterval(() => { revisarAvisos(); revisarPendientes(); revisarInventario(); }, 60000);
   const relojPing = setInterval(ping, 60000);
   const alVer = () => { revisarAvisos(); revisarPendientes(); ping(); };
   document.addEventListener('visibilitychange', alVer);
   document.addEventListener('ppstaff-pendientes', revisarPendientes);
   ctx.alDesmontar(() => { clearInterval(relojAvisos); clearInterval(relojPing); document.removeEventListener('visibilitychange', alVer); document.removeEventListener('ppstaff-pendientes', revisarPendientes); });
-  revisarAvisos(); revisarPendientes(); ping();
+  revisarAvisos(); revisarPendientes(); revisarInventario(); ping();
 
   function ir(id, opciones = {}) {
     actual = id;
@@ -107,6 +116,7 @@ export function montarPanel(raiz, ctx, yo) {
 
   async function montarInicio(el) {
     el.innerHTML = `<h2 class="saludo">Hola, ${esc(primerNombre(yo.nombre_completo))}</h2>
+      <section class="tarjeta" id="por-hacer"><h2>✅ Por hacer</h2><div class="por-hacer"><p class="cargando">Revisando…</p></div></section>
       ${esAdmin ? '<section class="tarjeta tarjeta-solicitud" id="tarjeta-solicitudes" hidden></section>' : ''}
       <section class="tarjeta tarjeta-avisos" id="tarjeta-avisos" hidden></section>
       <section class="tarjeta"><h2>Turnos de hoy</h2><div id="en-vivo" class="lista"></div></section>
@@ -126,7 +136,42 @@ export function montarPanel(raiz, ctx, yo) {
       } catch { tPend.hidden = true; }
     };
     tPend.addEventListener('click', (e) => { if (e.target.closest('[data-ir-pend]')) ir('pendientes'); });
-    const refrescar = () => { pintarEnVivo(vivo); pintarAvisos(tAvisos, yo, refrescar); revisarAvisos(); pintarPend(); };
+    // Por hacer: todo lo que espera una acción de gerencia/admin, con un toque para ir directo
+    const tHacer = $('#por-hacer .por-hacer', el);
+    const IR = {
+      pedidos_verificar: ['inventario', 'pedidos', '📦', (n) => `${n} pedido${n === 1 ? '' : 's'} por verificar`, 'Compáralo con la foto del ticket; al verificarlo se suma solo en Loyverse.'],
+      lv_aplicar: ['inventario', 'pedidos', '⬆️', (n) => `${n} cambio${n === 1 ? '' : 's'} por aplicar en Loyverse`, 'No se pudieron subir o falta tocar “Aplicar”.', 'mal'],
+      lv_sin_explicar: ['inventario', 'pedidos', '🕵️', (n) => `${n} cambio${n === 1 ? '' : 's'} raro${n === 1 ? '' : 's'} en Loyverse`, 'Existencias que cambiaron directo en Loyverse.', 'mal'],
+      conteos_revisar: ['inventario', 'conteos', '📋', (n) => `${n} conteo${n === 1 ? '' : 's'} por revisar`, 'Faltantes, sobrantes y a quién se cobra.'],
+      conteo_atrasado: ['inventario', 'conteos', '⏰', () => 'Conteo atrasado', 'Se abrió en un día anterior y nadie lo ha terminado.', 'mal'],
+      sol_articulos: ['inventario', 'catalogo', '🗂️', (n) => `${n} solicitud${n === 1 ? '' : 'es'} de artículos`, 'Dar de alta o quitar de la venta.'],
+      pend_cierre: ['pendientes', 'abiertos', '✔️', (n) => (n === 1 ? '1 pendiente pide cerrarse' : `${n} pendientes piden cerrarse`), 'El personal dice que ya quedó.'],
+      solicitudes: ['pendientes', 'solicitudes', '✋', (n) => `${n} solicitud${n === 1 ? '' : 'es'} del personal`, 'Material, cambios de tareas o ideas.'],
+      incidencias: ['pendientes', 'incidencias', '🛠️', (n) => `${n} incidencia${n === 1 ? '' : 's'} abierta${n === 1 ? '' : 's'}`, 'Algo descompuesto en el club.'],
+      sin_calendario: ['turnos', 'calendario', '📅', () => 'Llena el calendario de turnos', 'Así la app sabe a quién avisarle si no abre su turno.'],
+      sin_arranque: ['mas', 'ajustes', '🚀', () => 'Pon la fecha de arranque', 'Lo anterior se toma como prueba (no cuenta en el ranking).'],
+    };
+    const pintarHacer = async () => {
+      let r;
+      try { r = await api.rpc('gestion_por_hacer'); } catch { return; }
+      if (!r?.ok || !el.isConnected) return;
+      const items = Object.entries(IR).filter(([k]) => r[k] === true || Number(r[k]) > 0);
+      tHacer.innerHTML = items.length ? items.map(([k, [tab, sub, ico, txt, ayuda, cls]]) => `<button type="button" class="${cls || ''}" data-hacer="${k}" title="${esc(ayuda)}">
+          ${typeof r[k] === 'number' ? `<span class="ph-n">${r[k]}</span>` : `<span class="ph-n">${ico}</span>`}<span class="ph-txt">${typeof r[k] === 'number' ? `${ico} ` : ''}${esc(txt(Number(r[k])))}</span></button>`).join('')
+        : '<p class="todo-bien">🎉 Todo al día. No hay nada esperando.</p>';
+      const b = $('[data-badge-inv]', raiz);
+      const nInv = ['pedidos_verificar', 'lv_aplicar', 'conteos_revisar', 'sol_articulos', 'lv_sin_explicar'].reduce((s, k) => s + (Number(r[k]) || 0), 0);
+      if (b) { b.hidden = !nInv; b.textContent = nInv ? String(nInv) : ''; }
+    };
+    tHacer.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-hacer]'); if (!b) return;
+      const [tab, sub] = IR[b.dataset.hacer];
+      if (tab === 'inventario') api.guardarLocal('ppstaff-inv-seg', sub);
+      if (tab === 'pendientes') api.guardarLocal('ppstaff-pend-vista', sub);
+      if (tab === 'turnos') api.guardarLocal('ppstaff-turnos-vista', sub);
+      ir(tab, tab === 'mas' ? { vista: sub } : {});
+    });
+    const refrescar = () => { pintarEnVivo(vivo); pintarAvisos(tAvisos, yo, refrescar); revisarAvisos(); pintarPend(); pintarHacer(); };
     refrescar();
     vivo.addEventListener('click', (e) => { const b = e.target.closest('[data-turno]'); if (b) verTurno(b.dataset.turno, yo, refrescar); });
     const reloj = setInterval(() => { if (document.visibilityState === 'visible' && el.isConnected) refrescar(); }, 30000);

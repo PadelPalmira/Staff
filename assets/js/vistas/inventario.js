@@ -53,7 +53,8 @@ export function montarInventario(el, ctx, yo) {
 
 // ================= PEDIDOS (+ subir a Loyverse) =================
 function segPedidosYCarga(el, yo) {
-  el.innerHTML = '<div id="inv-sync"></div><section class="tarjeta por-pedir" id="inv-bajas" hidden></section><div id="inv-peds"></div>';
+  // Primero lo que hay que hacer (pedidos por verificar y por aplicar), luego vigilancia, "Por pedir" y el estado de la conexión.
+  el.innerHTML = '<div id="inv-peds"></div><div id="inv-sync"></div><section class="tarjeta por-pedir" id="inv-bajas" hidden></section>';
   const recargar = () => segPedidosYCarga(el, yo);
   segLoyverse($('#inv-sync', el), recargar, yo);
   segBajas($('#inv-bajas', el));
@@ -90,7 +91,7 @@ async function segPedidos(el, recargar) {
     return `<button type="button" class="fila" data-ped="${esc(p.id)}"><div class="fila-txt"><b>${esc(p.perfil_nombre)}${p.proveedor ? ` · ${esc(p.proveedor)}` : ''}</b>
       <span>${esc(fechaHora(p.creado_en))} · ${its.length} artículo${its.length === 1 ? '' : 's'}${nuevos ? ` · <span class="warn-txt">${nuevos} nuevo${nuevos === 1 ? '' : 's'}</span>` : ''}</span></div>${ins}</button>`;
   }
-  if (!peds.length) { el.innerHTML = '<h3 class="sub-titulo">Pedidos recibidos</h3><div class="tarjeta vacio"><p><b>Todavía no hay pedidos.</b></p><p>Los empleados los registran desde el celular del club (Inventario > Recibir pedido).</p></div>'; return; }
+  if (!peds.length) { el.innerHTML = '<p class="detalle" style="margin:4px 0 12px">📦 No hay pedidos recibidos todavía. El personal los registra desde el celular del club (Inventario › Recibir pedido).</p>'; return; }
   el.innerHTML = grupo('Por verificar', peds.filter((p) => p.estado === 'enviado'), '<p class="ayuda">Compara lo capturado contra la foto del ticket.</p>')
     + grupo('Verificados que faltan subir a Loyverse', peds.filter((p) => p.estado === 'verificado'), '<p class="ayuda">Arriba en “Por aplicar en Loyverse” puedes reintentar.</p>')
     + grupo('Anteriores', peds.filter((p) => p.estado === 'cargado' || p.estado === 'cancelado').slice(0, 20));
@@ -383,11 +384,7 @@ async function segLoyverse(el, recargar, yo) {
     ...r.conteos.map((c) => ({ origen: 'conteo', id: c.id, txt: `Corregir Loyverse con el conteo del ${fecha(c.fecha)}` })),
   ];
   const esAdmin = yo?.rol === 'admin';
-  let h = `<section class="tarjeta"><div class="lv-estado"><span class="lv-punto ${punto}"></span><h2 style="margin:0">Loyverse</h2>
-      <button type="button" class="btn chico ghost" data-sync style="margin-left:auto">↻ Actualizar ahora</button></div>
-    <p class="detalle">${r.ultima_sync ? `Conectado · actualizado ${esc(haceTxt(r.ultima_sync))} · ${r.ligados} artículos` : 'Todavía no se sincroniza.'}
-      ${err ? `<br><span class="${punto ? 'mal-txt' : 'warn-txt'}">Último error: ${esc(err)}</span>` : ''}</p>
-    <p class="ayuda">Catálogo, existencias, ventas y cierres de caja se leen solos cada 10 minutos. Los pedidos verificados, ajustes y correcciones de conteo se suben al momento. El celular del club nunca cambia Loyverse.</p></section>`;
+  let h = '';
   if (pend.length) h += `<section class="tarjeta tarjeta-avisos"><h2>⬆︎ Por aplicar en Loyverse (${pend.length})</h2><div class="lista">${pend.map((x) => `<div class="fila inv envolver"><div class="fila-txt"><b>${esc(x.txt)}</b>
       ${x.sub ? `<span>${esc(x.sub)}</span>` : ''}${x.error ? `<span class="mal-txt">No se pudo subir: ${esc(x.error)}</span>` : ''}</div>
       <div class="fila-botones" style="margin:0">${x.cancelar ? `<button type="button" class="btn chico ghost" data-cancelar-ajuste="${esc(x.id)}">Cancelar</button>` : ''}
@@ -397,6 +394,12 @@ async function segLoyverse(el, recargar, yo) {
     <div class="lista">${r.sin_explicar.map((d) => `<div class="fila inv"><div class="fila-txt"><b>${esc(d.nombre)}: <span class="${Number(d.diferencia) < 0 ? 'mal-txt' : 'warn-txt'}">${esc(signo(d.diferencia))}</span></b>
       <span>Loyverse pasó de ${esc(cantidad(d.antes))} a ${esc(cantidad(d.despues))}; con las ventas debía quedar en ${esc(cantidad(d.esperado))} · entre ${esc(horaCorta(d.desde))} y ${esc(fechaHora(d.hasta))}</span></div>
       ${esAdmin ? `<button type="button" class="btn chico ghost" data-explicar="${esc(d.id)}">Ya sé qué pasó</button>` : ''}</div>`).join('')}</div></section>`;
+  const estado = `<section class="tarjeta"><div class="lv-estado"><span class="lv-punto ${punto}"></span><h2 style="margin:0">Loyverse</h2>
+      <button type="button" class="btn chico ghost" data-sync style="margin-left:auto">↻ Actualizar ahora</button></div>
+    <p class="detalle">${r.ultima_sync ? `Conectado · actualizado ${esc(haceTxt(r.ultima_sync))} · ${r.ligados} artículos` : 'Todavía no se sincroniza.'}
+      ${err ? `<br><span class="${punto ? 'mal-txt' : 'warn-txt'}">Último error: ${esc(err)}</span>` : ''}</p>
+    <p class="ayuda">Catálogo, existencias, ventas y cierres de caja se leen solos cada 10 minutos. Los pedidos verificados, ajustes y correcciones de conteo se suben al momento. El celular del club nunca cambia Loyverse.</p></section>`;
+  h += estado;
   h += `<details class="bitacora"><summary>Últimos cambios hechos desde PP Staff (${r.movimientos.length})</summary>${r.movimientos.length ? `<div class="lista">${r.movimientos.map((m) => `<div class="fila inv"><div class="fila-txt">
     <b>${esc(m.nombre)} ${esc(signo(m.cantidad))}</b><span>${esc({ pedido: 'Pedido', ajuste: 'Ajuste', conteo: 'Conteo' }[m.origen])} · ${esc(cantidad(m.antes))} → ${esc(cantidad(m.despues))} · ${esc(m.por_nombre || '')} · ${esc(fechaHora(m.aplicado_en))}</span></div></div>`).join('')}</div>` : '<p class="detalle">Todavía no hay.</p>'}</details>`;
   h += `<details class="bitacora"><summary>Recordatorio de pedidos sin verificar</summary>${formAjustesCarga(aj)}</details>`;

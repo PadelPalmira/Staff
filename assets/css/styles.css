@@ -500,3 +500,26 @@ img.evidencia.previa-mini{width:72px;height:72px;object-fit:cover;margin:0;borde
 
 .fila.envolver{flex-wrap:wrap}.fila.envolver .fila-txt{flex:1 1 180px}.fila.envolver .fila-txt b,.fila.envolver .fila-txt span{white-space:normal;overflow:visible;text-overflow:clip}
 .fila.envolver .fila-botones{margin-left:auto!important}
+
+/* ===== 0.11 · legibilidad y navegación (sesión de depuración) ===== */
+/* Los nombres nunca se cortan con "…": se acomodan en dos renglones (importante para sabores y tamaños) */
+.fila-txt b,.fila-txt span{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+/* En celulares angostos los cuadros de cantidad bajan a otro renglón y el nombre se lee completo */
+.art-conteo .fila-txt,.item-ped .fila-txt{flex:1 1 150px}
+.art-conteo .cant-conteo,.item-ped .cant-ped{margin-left:auto}
+/* Contadores de las pestañas internas como globito, sin empujar el texto */
+.segmentos button[data-n]:not([data-n=""])::after{position:absolute;top:2px;right:3px;margin:0}
+/* Botones de texto y flechas más fáciles de tocar */
+.enlace{min-height:40px;padding:8px 6px}
+.icono-btn{width:40px;height:40px}
+.semana-nav b{text-transform:none}
+.semana-nav b::first-letter{text-transform:uppercase}
+/* Por hacer (Inicio de gerencia) */
+.por-hacer{display:flex;flex-direction:column;gap:8px}
+.por-hacer button{display:flex;align-items:center;gap:12px;width:100%;min-height:52px;padding:10px 14px;border-radius:14px;border:1px solid var(--border);background:var(--surface-2);color:var(--text);font:600 15px var(--font);text-align:left;cursor:pointer}
+.por-hacer button .ph-n{min-width:30px;height:30px;border-radius:15px;display:inline-flex;align-items:center;justify-content:center;background:var(--warn);color:#2a1d00;font-size:14px;padding:0 8px}
+.por-hacer button.mal .ph-n{background:var(--bad);color:#fff}
+.por-hacer button .ph-txt{flex:1}
+.por-hacer button .ph-txt small{display:block;font-weight:400;color:var(--text-3);font-size:12.5px;margin-top:2px}
+.por-hacer button::after{content:'›';font-size:22px;color:var(--text-3)}
+.todo-bien{display:flex;align-items:center;gap:10px;color:var(--ok);font-weight:600}

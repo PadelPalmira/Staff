@@ -290,11 +290,9 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
   function vistaInicio() {
     const hoy = new Date(est.ahora).toLocaleDateString('es-MX', { weekday: 'long', day: 'numeric', month: 'long', timeZone: TZ });
     let h = `<h2 class="saludo">Hola, ${esc(primerNombre(perfil.nombre_completo))}</h2><p class="sub cap">${esc(hoy)}</p>`;
-    h += tarjetaRecordatorios();
-    if (est.relevo && !est.relevo.leida) h += tarjetaRelevo();
-    if (invEst?.conteo) h += `<section class="tarjeta conteo-pend"><h2>📋 ${invEst.conteo.reconteo ? 'Gerencia pidió un reconteo' : 'Hoy toca conteo de inventario'}</h2><p class="detalle">Antes de las ${esc(invEst.conteo.limite)}. Puedes seguir vendiendo mientras cuentas.</p>
-      <button type="button" class="btn" data-ir-inv>Ir a Inventario</button></section>`;
+    // Orden: lo urgente arriba, luego TU TURNO (lo más importante), luego lo demás.
     if (est.dia_cerrado) h += `<p class="nota-aviso">Hoy está marcado como día cerrado${est.motivo_cerrado ? `: ${esc(est.motivo_cerrado)}` : ''}.</p>`;
+    h += tarjetaRecordatorios();
     for (const c of est.coberturas || []) {
       h += `<section class="tarjeta cobertura"><h2>🙋 ${esc(c.de_nombre)} pide que ${c.para_mi ? 'tú cubras' : 'alguien cubra'} su turno</h2>
         <p class="detalle">Turno ${esc(c.tipo_nombre || '')} · sale a las ${esc(horaCorta(c.fin_prog))} · quedan <b>${c.pendientes}</b> tarea${c.pendientes === 1 ? '' : 's'} pendiente${c.pendientes === 1 ? '' : 's'}${c.motivo ? `<br>Motivo: ${esc(c.motivo)}` : ''}</p>
@@ -329,7 +327,9 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
       if (u && u.fecha === est.hoy) h += `<section class="tarjeta"><h2>Tu último turno</h2><p class="detalle">Turno ${esc(u.tipo_nombre)} cerrado a las ${esc(horaCorta(u.cerrado_en))}.</p>
         <button type="button" class="btn ghost" data-ver-resumen>Ver resumen</button></section>`;
     }
-    if (est.relevo && est.relevo.leida) h += tarjetaRelevo();
+    if (est.relevo) h += tarjetaRelevo();
+    if (invEst?.conteo) h += `<section class="tarjeta conteo-pend"><h2>📋 ${invEst.conteo.reconteo ? 'Gerencia pidió un reconteo' : 'Hoy toca conteo de inventario'}</h2><p class="detalle">Antes de las ${esc(invEst.conteo.limite)}. Puedes seguir vendiendo mientras cuentas.</p>
+      <button type="button" class="btn" data-ir-inv>Ir a contar</button></section>`;
     if (est.pendientes) h += `<section class="tarjeta"><div class="enc-avisos"><h2>📌 Pendientes</h2><span class="sub">${est.pendientes}</span></div>
       <p class="detalle">Tienes ${est.pendientes} pendiente${est.pendientes === 1 ? '' : 's'} o incidencia${est.pendientes === 1 ? '' : 's'} abierta${est.pendientes === 1 ? '' : 's'}.</p>
       <button type="button" class="btn ghost" data-ir-pend>Ver pendientes</button></section>`;

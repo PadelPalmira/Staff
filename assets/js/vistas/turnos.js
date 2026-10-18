@@ -53,7 +53,7 @@ async function pintarVentas(el, id) {
   if (!r?.ok) return;
   const cajas = (r.cajas || []).map((c) => {
     const d = Number(c.diferencia || 0);
-    return `<li>💵 Caja ${esc(c.pos || '')} cerrada a las ${esc(horaCorta(c.cerrado_en))}${c.cerro ? ` por ${esc(c.cerro)}` : ''}: ${Math.abs(d) < 1 ? '<b class="ok-txt">cuadró</b>'
+    return `<li>💵 ${esc(c.pos || 'Caja')} · cierre de caja a las ${esc(horaCorta(c.cerrado_en))}${c.cerro ? ` por ${esc(c.cerro)}` : ''}: ${Math.abs(d) < 1 ? '<b class="ok-txt">cuadró</b>'
       : `<b class="mal-txt">${d < 0 ? 'faltaron' : 'sobraron'} ${esc(pesosTxt(Math.abs(d)))}</b>`}</li>`;
   }).join('');
   el.innerHTML = `<h3 class="sub-titulo">🧾 Ventas en Loyverse durante el turno</h3>
