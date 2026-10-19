@@ -5,7 +5,7 @@ import { esc, $, conOcupado, mostrarError, quitarError, activarMostrar, campoPas
 
 export function montarLogin(raiz, ctx, { aviso = '' } = {}) {
   raiz.innerHTML = `<main class="pantalla centrada">
-    <div class="marca"><div class="logo-chip" aria-hidden="true">PP</div><h1>PP Staff</h1><p class="sub">Padel Palmira</p></div>
+    <div class="marca"><img class="logo-img" src="assets/img/logo.png" alt="Padel Palmira"><h1>PP Staff</h1><p class="sub">Padel Palmira</p></div>
     <form class="tarjeta formulario" id="f-login" novalidate>
       <h2>Entrar</h2>
       ${aviso ? `<p class="nota-info">${esc(aviso)}</p>` : ''}

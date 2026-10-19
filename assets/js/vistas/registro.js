@@ -4,7 +4,7 @@ import { esc, $, ROL, conOcupado, mostrarError, quitarError, soloNumeros, activa
          selectorFoto, pinValido, celularValido, MENSAJE_PIN, fechaCorta } from '../ui.js';
 
 const pantalla = (cuerpo) => `<main class="pantalla centrada">
-  <div class="marca"><div class="logo-chip" aria-hidden="true">PP</div><h1>PP Staff</h1><p class="sub">Padel Palmira</p></div>${cuerpo}</main>`;
+  <div class="marca"><img class="logo-img" src="assets/img/logo.png" alt="Padel Palmira"><h1>PP Staff</h1><p class="sub">Padel Palmira</p></div>${cuerpo}</main>`;
 
 export async function montarRegistro(raiz, ctx, token) {
   raiz.innerHTML = pantalla('<p class="cargando">Revisando tu invitación…</p>');

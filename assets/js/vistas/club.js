@@ -38,7 +38,7 @@ async function crearClub(raiz, ctx, { porAdmin, inicial, modoClub }) {
   // ---------- selector de usuario ----------
   async function pantallaSelector() {
     raiz.innerHTML = `${modoClub ? `<div class="modo-club-barra"><span>📱 Este teléfono funciona como celular del club hasta las ${esc(horaCorta(modoClub))}</span><button type="button" data-salir-modo>Salir</button></div>` : ''}<main class="pantalla">
-      <header class="cab-club"><div class="logo-chip chico" aria-hidden="true">PP</div><div><h1>¿Quién eres?</h1><p class="sub">Toca tu nombre</p></div>
+      <header class="cab-club"><img class="logo-img chico" src="assets/img/logo.png" alt="" aria-hidden="true"><div><h1>¿Quién eres?</h1><p class="sub">Toca tu nombre</p></div>
         ${porAdmin ? '' : '<button type="button" class="btn-mas" data-pedir aria-label="Pedir un usuario nuevo" title="Pedir un usuario nuevo">＋</button>'}</header>
       <div class="tiles" id="tiles"><p class="cargando">Cargando…</p></div>
       <p class="pie"><a href="#/diagnostico">Diagnóstico</a> · versión ${esc(APP_VERSION)}${porAdmin ? '' : ' · <button type="button" class="enlace" data-push hidden>🔔 Activar avisos en este celular</button>'}</p></main>`;
@@ -187,7 +187,7 @@ async function crearClub(raiz, ctx, { porAdmin, inicial, modoClub }) {
     ultimaActividad = Date.now();
     const emp = montarEmpleado(raiz, {
       token, perfil, porAdmin,
-      alSalir: () => cerrarUsuario('manual'),
+      alSalir: (m) => cerrarUsuario(m === 'turno' ? 'turno' : 'manual'),
       alVolverAdmin: () => cerrarUsuario('admin'),
       alSesionInvalida: () => cerrarUsuario('expirada'),
     });
@@ -203,6 +203,7 @@ async function crearClub(raiz, ctx, { porAdmin, inicial, modoClub }) {
     if (t) api.rpc('sesion_cerrar', { p_token: t }).catch(() => null);
     if (motivo === 'admin') return ctx.volverAdmin();
     if (motivo === 'inactividad') aviso('Tu usuario se cerró por inactividad.', 'info', 5000);
+    else if (motivo === 'turno') aviso('Turno cerrado. Tu usuario se cerró solo. ¡Gracias!', 'ok', 5000);
     else if (motivo === 'expirada') aviso('Tu sesión terminó. Vuelve a entrar con tu PIN.', 'info', 5000);
     else aviso('Saliste de tu usuario.', 'ok', 2500);
     if (!cerrado) pantallaSelector();

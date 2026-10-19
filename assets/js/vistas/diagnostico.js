@@ -4,7 +4,7 @@ import { SUPABASE_URL, SUPABASE_KEY, APP_VERSION, APP_BUILD } from '../config.js
 export function montarDiagnostico(raiz, ctx) {
   raiz.innerHTML = `<main class="pantalla">
     <header class="top">
-      <div class="logo-chip" aria-hidden="true">PP</div>
+      <img class="logo-img" src="assets/img/logo.png" alt="Padel Palmira">
       <div><h1>Diagnóstico</h1><p class="sub">PP Staff · versión ${APP_VERSION} (${APP_BUILD})</p></div>
     </header>
     <p class="intro">Comprueba que este teléfono puede usar la app. Si las cuatro tarjetas salen en verde, todo está bien.</p>

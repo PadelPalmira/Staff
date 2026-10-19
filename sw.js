@@ -1,6 +1,6 @@
 // Service worker de PP Staff: guarda la app en el teléfono para abrirla sin internet
 // y recibe notificaciones. No toca las llamadas a Supabase ni a otros servidores.
-const VERSION = '0.13.0';
+const VERSION = '0.14.0';
 const CACHE = `ppstaff-shell-${VERSION}`;
 const SHELL = [
   './',
@@ -32,10 +32,12 @@ const SHELL = [
   './assets/js/vistas/restablecer.js',
   './assets/js/vistas/registro.js',
   './assets/js/vistas/diagnostico.js',
+  './assets/js/vistas/tablero.js',
   './assets/img/icon-180.png',
   './assets/img/icon-192.png',
   './assets/img/icon-512.png',
   './assets/img/favicon-32.png',
+  './assets/img/logo.png',
 ];
 
 self.addEventListener('install', (event) => {

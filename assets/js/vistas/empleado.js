@@ -15,7 +15,9 @@ const ERR = {
   falta_motivo: 'Escribe el motivo (mínimo 3 letras).', ya_no_disponible: 'Esa solicitud ya no está disponible (ya la tomó alguien o se canceló).',
   no_es_para_ti: 'Esa solicitud es para otro compañero.', sin_turno: 'No tienes un turno abierto.', mismo: 'Ese turno ya es tuyo.', perfil_invalido: 'Ese compañero ya no está activo.',
   sin_conexion: 'No hay internet. Revisa la conexión e intenta de nuevo.',
+  auto_loyverse: 'Esta tarea se marca sola cuando Loyverse registra la caja. No se puede marcar a mano.',
 };
+const AUTO_TXT = { caja_abierta: 'abras la caja', caja_cerrada: 'cierres la caja' };
 const msg = (r) => ERR[r?.error] || r?.mensaje || 'No se pudo completar. Intenta de nuevo.';
 const SECCIONES = [['apertura', 'Al abrir el turno'], ['semanal', 'Semanales de hoy'], ['cierre', 'Al cerrar el turno']];
 const ICONO_TURNO = { manana: '☀️', tarde: '🌇', domingo: '☀️' };
@@ -435,6 +437,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     const listo = x.estado !== 'pendiente';
     const nsp = x.estado === 'no_se_pudo';
     const inc = !!x.incidencia_id;
+    if (x.auto) return filaAuto(x, listo, nsp);
     return `<div class="tarea ${listo ? 'lista' : ''} ${nsp ? 'nosepudo' : ''} ${vencida(x) ? 'vencida' : ''} ${x.estado === 'excusada' ? 'excusada' : ''} ${inc ? 'incid' : ''}" data-id="${esc(x.id)}">
       <button type="button" class="tarea-check" data-a="${listo ? 'quitar' : 'marcar'}" aria-label="${listo ? 'Quitar marca' : 'Marcar como hecha'}" ${x.estado === 'excusada' ? 'disabled' : ''}>${nsp ? '!' : listo ? '✓' : inc ? '🛠️' : (x.requiere_foto ? '📷' : '')}</button>
       <div class="tarea-txt"><b>${esc(x.nombre)}</b><span class="tarea-meta">${metaTarea(x)}</span>
@@ -442,6 +445,40 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
         ${!listo ? `<span class="tarea-botones">${inc ? '<button type="button" class="chip" data-a="reportar">Reportar</button><button type="button" class="chip" data-a="arreglado">Ya se arregló</button>'
           : `${x.condicional ? `<button type="button" class="chip" data-a="noaplica">${esc(x.etiqueta_no_aplica || 'No aplica hoy')}</button>` : ''}
           <button type="button" class="chip" data-a="nopuedo">No se puede</button>`}</span>` : ''}</div></div>`;
+  }
+  // Tareas que marca Loyverse (abrir/cerrar caja): nadie las puede marcar a mano
+  function filaAuto(x, listo, nsp) {
+    const hecha = x.estado === 'hecha';
+    const meta = hecha ? `<span class="${x.a_tiempo ? 'ok-txt' : 'warn-txt'}">${esc(x.razon || '✓ Loyverse')}${x.a_tiempo ? '' : ' · fuera de tiempo'}</span>`
+      : x.estado === 'excusada' ? '<span class="ok-txt">Excusada por gerencia</span>'
+      : nsp ? `<span class="warn-txt">⚠ No se pudo · se avisó a gerencia</span>${x.razon ? `<span class="tarea-meta">Razón: ${esc(x.razon)}</span>` : ''}`
+      : `<span class="auto-txt">🔒 Se marca sola cuando ${AUTO_TXT[x.auto] || 'Loyverse lo registre'} en Loyverse</span>${x.limite ? ` · ${vencida(x) ? `<span class="mal-txt">Venció a las ${esc(horaCorta(x.limite))}</span>` : `Antes de las ${esc(horaCorta(x.limite))}`}` : ''}`;
+    return `<div class="tarea auto ${listo ? 'lista' : ''} ${nsp ? 'nosepudo' : ''} ${!listo && vencida(x) ? 'vencida' : ''}" data-id="${esc(x.id)}">
+      <span class="tarea-check candado" aria-hidden="true">${hecha ? '✓' : nsp ? '!' : '🔒'}</span>
+      <div class="tarea-txt"><b>${esc(x.nombre)}</b><span class="tarea-meta">${meta}</span>
+        ${x.estado === 'pendiente' || nsp ? `<span class="tarea-botones"><button type="button" class="chip" data-a="sync">🔄 Ya lo hice en Loyverse</button>
+          ${nsp ? '' : '<button type="button" class="chip" data-a="nopuedo">No se puede</button>'}</span>` : ''}</div></div>`;
+  }
+  // Pide a Loyverse los datos nuevos y vuelve a revisar unas veces
+  let revisando = null;
+  async function revisarLoyverse({ callado = false, esperas = [8000, 12000, 15000, 20000] } = {}) {
+    if (revisando) return revisando;
+    revisando = (async () => {
+      const r = await llamar('lv_sync_pedir');
+      if (!r.ok && !callado) { aviso(msg(r), 'error'); return false; }
+      if (!callado) aviso('Revisando Loyverse… tarda menos de un minuto.', 'info', 4000);
+      const ids = new Set((est.mio?.tareas || []).filter((x) => x.auto && x.estado !== 'hecha').map((x) => x.id));
+      for (const espera of esperas) {
+        await new Promise((ok) => setTimeout(ok, espera));
+        if (muerto || !est.mio) return false;
+        await cargar({ silencioso: true });
+        const faltan = (est.mio?.tareas || []).filter((x) => ids.has(x.id) && x.estado !== 'hecha');
+        if (!faltan.length) { if (!callado) aviso('✓ Loyverse ya lo registró.', 'ok'); return true; }
+      }
+      if (!callado) aviso('Loyverse todavía no lo registra. Revisa que hayas abierto/cerrado la caja en el iPad y espera unos minutos: se marca sola.', 'info', 9000);
+      return false;
+    })();
+    try { return await revisando; } finally { revisando = null; }
   }
   function vistaTareas() {
     const t = est.mio;
@@ -578,6 +615,13 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
           if (!rn.ok) return aviso(msg(rn), 'error');
           est.mi_nota_relevo = nota;
         }
+        if (est.mio.tareas.some((x) => x.auto && x.estado === 'pendiente')) {
+          aviso('Revisando en Loyverse si ya cerraste la caja…', 'info', 4000);
+          await revisarLoyverse({ callado: true, esperas: [3000, 6000, 8000] });
+          if (muerto || !est.mio) return;
+          const falta = est.mio.tareas.find((x) => x.auto === 'caja_cerrada' && x.estado === 'pendiente');
+          if (falta && !await confirmar({ titulo: 'Falta cerrar la caja', texto: 'Loyverse todavía no registra el cierre de caja. Primero cierra la caja en el iPad (Loyverse) y luego cierra tu turno. Si cierras tu turno ahora, la tarea queda “sin hacer”.', ok: 'Cerrar turno de todos modos' })) return;
+        }
         const r = await llamar('turno_cerrar', { p_turno_id: est.mio.id, p_razones: {}, p_forzar: false });
         if (muerto) return;
         if (r.ok) { v.cerrar(); return terminado(r.turno); }
@@ -618,12 +662,26 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
         ${r.tarde_min > 0 ? `<dt>Abriste</dt><dd>${r.tarde_min} min después de tu hora</dd>` : ''}
         ${r.cerro_antes_min > 0 ? `<dt>Cerraste</dt><dd>${r.cerro_antes_min} min antes de tu hora</dd>` : ''}</dl>`;
   }
+  // Al cerrar el turno se muestra el resumen y el usuario se cierra solo (así nadie sigue usando su sesión)
+  const SEG_SALIDA = 20;
   function terminado(turno) {
     est.mio = null; est.ultimo_cerrado = turno; desemp = null;
-    const v = ventana(`${resumenHtml(turno)}<div class="acciones"><button type="button" class="btn grande" data-salir-usuario>Salir de mi usuario</button>
-      <button type="button" class="btn ghost" data-cerrar>Listo</button></div>`, { titulo: 'Resumen del turno' });
-    $('[data-salir-usuario]', v.el).addEventListener('click', () => { v.cerrar(); alSalir(); });
-    ir('inicio'); cargar({ silencioso: true });
+    if (porAdmin) {
+      ventana(`${resumenHtml(turno)}<div class="acciones"><button type="button" class="btn ghost" data-cerrar>Listo</button></div>`, { titulo: 'Resumen del turno' });
+      ir('inicio'); cargar({ silencioso: true });
+      return;
+    }
+    let seg = SEG_SALIDA, reloj = null, salio = false;
+    const salirYa = () => { if (salio) return; salio = true; clearInterval(reloj); v.cerrar(); alSalir('turno'); };
+    const v = ventana(`${resumenHtml(turno)}<p class="nota-aviso salida-auto">🔒 Tu usuario se cierra solo en <b data-seg>${seg}</b> s.</p>
+      <div class="acciones"><button type="button" class="btn grande" data-salir-usuario>Salir ahora</button></div>`, { titulo: 'Resumen del turno', alCerrar: () => salirYa() });
+    reloj = setInterval(() => {
+      seg -= 1;
+      const b = $('[data-seg]', v.el); if (b) b.textContent = String(Math.max(seg, 0));
+      if (seg <= 0) salirYa();
+    }, 1000);
+    limpiezas.push(() => clearInterval(reloj));
+    $('[data-salir-usuario]', v.el).addEventListener('click', salirYa);
   }
 
   // ---------- eventos ----------
@@ -665,6 +723,8 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     const x = est.mio.tareas.find((q) => q.id === fila.dataset.id);
     if (!x) return;
     const a = b.dataset.a;
+    if (x.auto && a !== 'nopuedo' && a !== 'sync') return aviso(ERR.auto_loyverse, 'info');
+    if (a === 'sync') return conOcupado(b, () => revisarLoyverse());
     if (a === 'marcar' || a === 'reportar') {
       if (x.incidencia_id) return ventanaIncidencia(x);
       return x.requiere_foto ? pedirFoto(x, fila) : conOcupado(b, () => marcar(x.id, 'hecha'));

@@ -4,23 +4,25 @@ import { APP_VERSION } from '../config.js';
 import { esc, $, $$, ROL, aviso, conOcupado, campoPassword, activarMostrar, mostrarError, quitarError, duracionTexto } from '../ui.js';
 import { montarUsuarios } from './usuarios.js';
 import { montarAjustes } from './ajustes.js';
+import { montarTablero } from './tablero.js';
 import { estadoPush, activarPush, desactivarPush, probarPush, esIOS } from '../push.js';
 
 const LLAVE = 'ppstaff-mas-vista';
 
 export function montarMas(el, ctx, yo, { vista: inicial } = {}) {
   const esAdmin = yo.rol === 'admin';
-  const vistas = esAdmin ? [['usuarios', '☺<br>Usuarios'], ['ajustes', '⚙<br>Ajustes'], ['actividad', '📈<br>Actividad'], ['cuenta', '👤<br>Mi cuenta']] : [['cuenta', '👤 Mi cuenta']];
+  const vistas = esAdmin ? [['tablero', '📊<br>Tablero'], ['usuarios', '☺<br>Usuarios'], ['ajustes', '⚙<br>Ajustes'], ['actividad', '📈<br>Actividad'], ['cuenta', '👤<br>Mi cuenta']] : [['cuenta', '👤 Mi cuenta']];
   let vista = inicial || api.leerLocal(LLAVE) || vistas[0][0];
   if (!vistas.some((v) => v[0] === vista)) vista = vistas[0][0];
-  el.innerHTML = `${vistas.length > 1 ? `<div class="segmentos cuatro" role="tablist">${vistas.map(([k, n]) => `<button type="button" data-vista="${k}">${n}${k === 'usuarios' ? '<i class="punto-aviso" data-badge-sol hidden></i>' : ''}</button>`).join('')}</div>` : ''}
+  el.innerHTML = `${vistas.length > 1 ? `<div class="segmentos cuatro" role="tablist" style="--n:${vistas.length}">${vistas.map(([k, n]) => `<button type="button" data-vista="${k}">${n}${k === 'usuarios' ? '<i class="punto-aviso" data-badge-sol hidden></i>' : ''}</button>`).join('')}</div>` : ''}
     <div id="mas-cont"></div>`;
   function poner(v) {
     vista = v; api.guardarLocal(LLAVE, v);
     $$('[data-vista]', el).forEach((b) => b.setAttribute('aria-selected', String(b.dataset.vista === v)));
     const c = $('#mas-cont', el);
     const n = c.cloneNode(false); c.replaceWith(n);
-    if (v === 'usuarios') montarUsuarios(n, ctx, yo);
+    if (v === 'tablero') montarTablero(n);
+    else if (v === 'usuarios') montarUsuarios(n, ctx, yo);
     else if (v === 'ajustes') montarAjustes(n, ctx, yo);
     else if (v === 'actividad') montarActividad(n);
     else montarCuenta(n, yo);

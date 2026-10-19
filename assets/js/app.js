@@ -30,7 +30,7 @@ api.onSesion((hay) => {
 });
 
 function pantallaMensaje({ titulo, texto, boton, alTocar, secundario }) {
-  raiz.innerHTML = `<main class="pantalla centrada"><div class="marca"><div class="logo-chip" aria-hidden="true">PP</div><h1>PP Staff</h1></div>
+  raiz.innerHTML = `<main class="pantalla centrada"><div class="marca"><img class="logo-img" src="assets/img/logo.png" alt="Padel Palmira"><h1>PP Staff</h1></div>
     <div class="tarjeta vacio"><p><b>${esc(titulo)}</b></p><p>${esc(texto)}</p>
     ${boton ? `<button class="btn" data-a>${esc(boton)}</button>` : ''}${secundario ? `<button class="btn ghost" data-b>${esc(secundario.texto)}</button>` : ''}</div></main>`;
   raiz.querySelector('[data-a]')?.addEventListener('click', alTocar);

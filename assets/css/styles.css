@@ -34,6 +34,8 @@ button{font-family:inherit}
 .logo-chip{width:56px;height:56px;border-radius:17px;background:var(--grad);color:#06181a;font-weight:800;
   font-size:21px;display:grid;place-items:center;letter-spacing:-.5px;flex:none}
 .logo-chip.chico{width:40px;height:40px;border-radius:12px;font-size:15px}
+.logo-img{height:96px;width:auto;flex:none;display:block;margin:0 auto;filter:drop-shadow(0 0 10px rgba(255,0,193,.35))}
+.logo-img.chico{height:40px;margin:0;filter:none}
 .sub{margin:2px 0 0;color:var(--text-2);font-size:13px}
 .pie{margin:20px 0 0;text-align:center;color:var(--text-3);font-size:12px}
 .pie a{color:var(--text-2)}
@@ -503,7 +505,7 @@ img.evidencia.previa-mini{width:72px;height:72px;object-fit:cover;margin:0;borde
 
 /* ===== 0.11 · legibilidad y navegación (sesión de depuración) ===== */
 /* Los nombres nunca se cortan con "…": se acomodan en dos renglones (importante para sabores y tamaños) */
-.fila-txt b,.fila-txt span{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:anywhere}
+.fila-txt b,.fila-txt span{white-space:normal;overflow:visible;text-overflow:clip;overflow-wrap:break-word}
 /* En celulares angostos los cuadros de cantidad bajan a otro renglón y el nombre se lee completo */
 .art-conteo .fila-txt,.item-ped .fila-txt{flex:1 1 150px}
 .art-conteo .cant-conteo,.item-ped .cant-ped{margin-left:auto}
@@ -529,3 +531,50 @@ img.evidencia.previa-mini{width:72px;height:72px;object-fit:cover;margin:0;borde
 .reglas-conteo{margin:6px 0 14px;padding-left:4px;list-style:none;display:flex;flex-direction:column;gap:8px;font-size:14.5px;line-height:1.4}
 .confirmar-conteo{margin:12px 0;padding:12px;border-radius:12px;background:var(--surface-2);border:1px solid var(--border)}
 .confirmar-conteo span{font-size:15px}
+
+.fila.cobro{flex-wrap:wrap}.fila.cobro .fila-txt{flex:1 1 140px}.fila.cobro .cobro-ctl{margin-left:auto}
+
+/* 0.14: tareas que marca Loyverse, salida automática */
+.tarea.auto .tarea-check.candado{display:grid;place-items:center;font-size:18px;cursor:default;border-style:dashed}
+.tarea.auto.lista .tarea-check.candado{border-style:solid}
+.auto-txt{color:var(--text-2)}
+.salida-auto{text-align:center;margin-top:12px}
+
+/* 0.14: tablero del dueño */
+.boton-tablero{display:flex;align-items:center;gap:12px;width:100%;text-align:left;cursor:pointer;color:var(--text);font:inherit;
+  background:linear-gradient(135deg,rgba(255,0,193,.16),rgba(0,242,234,.10));border:1px solid rgba(255,0,193,.35)}
+.boton-tablero>span{font-size:28px}.boton-tablero div{flex:1;min-width:0}.boton-tablero b{display:block;font-size:16px}
+.boton-tablero>i{font-style:normal;font-size:26px;color:var(--text-2)}
+.segmentos.cuatro[style*="--n:5"] button{font-size:12px;padding:0 2px}
+.tab-nav{display:flex;align-items:center;gap:8px;margin:0 0 12px}
+.tab-nav .icono-btn{width:44px;height:44px;font-size:24px;flex:none}
+.tab-nav .icono-btn:disabled{opacity:.3}
+.tab-nav-txt{flex:1;text-align:center}.tab-nav-txt b{display:block;font-size:17px}
+.kpi-grande span{display:block;color:var(--text-2);font-size:13px}
+.kpi-grande b{display:block;font-size:34px;letter-spacing:-.8px;line-height:1.15}
+.kpi-grande i{display:block;font-style:normal;font-size:12.5px;margin-top:2px}
+.cifras.tres b{overflow-wrap:break-word}
+.graf-ventas{display:flex;align-items:stretch;gap:6px;height:150px;margin-top:16px;padding-top:16px}
+.graf-ventas.mes{gap:2px}
+.gv-dia{flex:1;min-width:0;display:flex;flex-direction:column;justify-content:flex-end;align-items:center;position:relative}
+.gv-dia span{display:block;width:100%;background:var(--grad);border-radius:6px 6px 2px 2px;opacity:.75}
+.graf-ventas.mes .gv-dia span{border-radius:3px 3px 1px 1px}
+.gv-dia.mejor span{opacity:1;box-shadow:0 0 10px rgba(255,0,193,.45)}
+.gv-dia em{font-style:normal;font-size:10.5px;color:var(--text-2);margin-bottom:3px;white-space:nowrap}
+.gv-dia i{font-style:normal;font-size:11px;color:var(--text-3);margin-top:4px;height:14px;text-transform:capitalize}
+.gv-dia.futuro i{opacity:.5}
+.tabla-tab{width:100%;border-collapse:collapse;font-size:13.5px;margin-top:12px}
+.tabla-tab th{font-size:11.5px;color:var(--text-2);font-weight:600;text-align:center;padding:6px 4px;border-bottom:1px solid var(--border)}
+.tabla-tab td{text-align:center;padding:8px 4px;border-bottom:1px solid var(--border)}
+.tabla-tab th:first-child,.tabla-tab td:first-child{text-align:left}
+.tabla-tab small{color:var(--text-3)}
+.lista-tab{list-style:none;margin:12px 0 0;padding:0}
+.lista-tab li{display:flex;justify-content:space-between;gap:10px;padding:9px 0;border-top:1px solid var(--border);font-size:14px}
+.lista-tab li span{min-width:0;overflow-wrap:break-word}
+.lista-tab li b{flex:none;text-align:right}
+.lista-tab small{display:block;font-weight:400;color:var(--text-3);font-size:11.5px}
+.lista-top{list-style:none;margin:0;padding:0}
+.lista-top li{padding:8px 0}
+.lista-top li div{display:flex;justify-content:space-between;gap:10px;font-size:14px}
+.lista-top li i{display:block;height:6px;border-radius:3px;background:var(--grad);margin:5px 0 2px}
+.lista-top small{color:var(--text-3);font-size:11.5px}

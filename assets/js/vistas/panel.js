@@ -19,7 +19,7 @@ export function montarPanel(raiz, ctx, yo) {
 
   raiz.innerHTML = `<div class="panel">
     <header class="barra">
-      <div class="barra-izq"><div class="logo-chip chico" aria-hidden="true">PP</div>
+      <div class="barra-izq"><img class="logo-img chico" src="assets/img/logo.png" alt="" aria-hidden="true">
         <div><b>PP Staff</b><span class="sub">${esc(ROL[yo.rol] || yo.rol)}</span></div></div>
       <div class="barra-der">${avatar(yo, 'sm')}<button type="button" class="enlace" data-salir>Salir</button></div>
     </header>
@@ -116,6 +116,7 @@ export function montarPanel(raiz, ctx, yo) {
 
   async function montarInicio(el) {
     el.innerHTML = `<h2 class="saludo">Hola, ${esc(primerNombre(yo.nombre_completo))}</h2>
+      ${esAdmin ? '<button type="button" class="tarjeta boton-tablero" data-ir-tablero><span aria-hidden="true">📊</span><div><b>Tablero del dueño</b><span class="sub">Ventas, cumplimiento, descuadres y costos de la semana o el mes</span></div><i aria-hidden="true">›</i></button>' : ''}
       <section class="tarjeta" id="por-hacer"><h2>✅ Por hacer</h2><div class="por-hacer"><p class="cargando">Revisando…</p></div></section>
       ${esAdmin ? '<section class="tarjeta tarjeta-solicitud" id="tarjeta-solicitudes" hidden></section>' : ''}
       <section class="tarjeta tarjeta-avisos" id="tarjeta-avisos" hidden></section>
@@ -136,6 +137,7 @@ export function montarPanel(raiz, ctx, yo) {
       } catch { tPend.hidden = true; }
     };
     tPend.addEventListener('click', (e) => { if (e.target.closest('[data-ir-pend]')) ir('pendientes'); });
+    $('[data-ir-tablero]', el)?.addEventListener('click', () => ir('mas', { vista: 'tablero' }));
     // Por hacer: todo lo que espera una acción de gerencia/admin, con un toque para ir directo
     const tHacer = $('#por-hacer .por-hacer', el);
     const IR = {
