@@ -1,5 +1,6 @@
 // Administración de usuarios: lista, invitaciones por correo, creación directa, edición, PIN, entrar como, activar/desactivar y eliminar.
 import * as api from '../api.js';
+import { formPrefsAvisos } from './revisiones.js';
 import { esc, $, ROL, avatar, hidratarAvatares, aviso, ventana, confirmar, conOcupado, selectorFoto, dataUrlABlob,
          campoPassword, campoPin, activarMostrar, soloNumeros, pinValido, celularValido, formatoCelular, MENSAJE_PIN,
          mostrarError, quitarError, fechaCorta, fechaHora, diasPara } from '../ui.js';
@@ -317,6 +318,7 @@ export async function montarUsuarios(el, ctx, yo) {
         ${p.rol !== 'dispositivo' ? `<button type="button" class="btn ghost" data-a="pin">${p.tiene_pin ? 'Cambiar PIN' : 'Asignar PIN'}</button>` : ''}
         ${bloqueado ? '<button type="button" class="btn ghost" data-a="desbloquear">Quitar bloqueo del PIN</button>' : ''}
         ${p.rol !== 'recepcion' && !esYo ? '<button type="button" class="btn ghost" data-a="password">🔑 Cambiar contraseña</button>' : ''}
+        ${p.rol === 'gerencia' && yo.rol === 'admin' ? '<button type="button" class="btn ghost" data-a="avisos">📬 Avisos que recibe</button>' : ''}
         ${esYo ? '' : `<button type="button" class="btn ghost" data-a="estado">${p.estado === 'activo' ? 'Desactivar usuario' : 'Activar usuario'}</button>
         <button type="button" class="btn peligro-suave" data-a="eliminar">Eliminar usuario</button>`}</div>`, { titulo: 'Usuario' });
     hidratarAvatares(v.el);
@@ -334,6 +336,7 @@ export async function montarUsuarios(el, ctx, yo) {
       if (a === 'editar') { v.cerrar(); return ventanaEditar(p); }
       if (a === 'pin') { v.cerrar(); return ventanaPin(p); }
       if (a === 'password') { v.cerrar(); return ventanaPassword(p); }
+      if (a === 'avisos') { v.cerrar(); const w = ventana('<div></div>', { titulo: '📬 Avisos que recibe' }); return formPrefsAvisos(w.el.firstElementChild, p.id); }
       if (a === 'desbloquear') return conOcupado(b, async () => {
         try {
           const r = await api.rpc('admin_desbloquear_pin', { p_id: p.id });

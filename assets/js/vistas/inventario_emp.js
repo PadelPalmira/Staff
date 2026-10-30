@@ -4,7 +4,7 @@ import { estiloCategoria, miniArticulo, hidratarFotosArticulos } from '../catego
 import { esc, $, $$, aviso, ventana, confirmar, conOcupado, fechaCorta, fechaHora, comprimirEvidencia, cantidad, pesos, plural } from '../ui.js';
 
 const ERR = {
-  falta_ticket: 'Toma la foto del ticket.', sin_articulos: 'Agrega al menos un artículo.', cantidad_invalida: 'Revisa las cantidades (deben ser mayores a 0).',
+  falta_ticket: 'Toma la foto del ticket o sube la imagen / PDF.', falta_motivo_dano: 'Di qué le pasó a lo que llegó mal.', falta_foto_dano: 'Toma la foto de lo que llegó mal.', sin_articulos: 'Agrega al menos un artículo.', cantidad_invalida: 'Revisa las cantidades (deben ser mayores a 0).',
   articulo_invalido: 'Hay un artículo que no se reconoce.', conteo_no_disponible: 'Este conteo ya no está disponible (lo cerró o reasignó gerencia).', en_curso: 'Alguien más ya está haciendo el conteo.',
   sin_conexion: 'No hay internet. Revisa la conexión e intenta de nuevo.',
 };
@@ -13,6 +13,8 @@ const ESTADO = { enviado: ['Por verificar', 'gris'], verificado: ['Verificado', 
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
 const tieneEmpaque = (a) => !!a.empaque_nombre && Number(a.empaque_factor) > 0;
 const unidadTxt = (a, n) => plural(a.unidad || 'pieza', n);
+const MOTIVOS_DANO = ['Golpeado', 'Abierto', 'Roto', 'Caducado', 'No llegó'];
+const MAX_PDF = 6 * 1024 * 1024;
 
 export function montarInventarioEmp(cont, { llamar, alCambio }) {
   let est = null, vista = 'inicio', muerto = false;
@@ -99,7 +101,7 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     el.innerHTML = `<div class="enc-seccion"><h2>Recibir pedido</h2><button type="button" class="enlace" data-volver>Cancelar</button></div>
       <div class="formulario">
         <div class="campo"><label for="pe-prov">Proveedor <span class="opc">(opcional)</span></label><input id="pe-prov" type="text" placeholder="Ej. Coca-Cola, Sabritas, Costco"></div>
-        <div class="campo"><label>Foto del ticket</label><div class="ticket-foto" id="pe-ticket"><button type="button" class="btn ghost" data-ticket>📷 Tomar foto del ticket</button></div></div>
+        <div class="campo"><label>Ticket del proveedor</label><div class="ticket-foto" id="pe-ticket"></div></div>
         <div class="campo"><label for="pe-buscar">¿Qué llegó?</label><input id="pe-buscar" type="text" placeholder="Busca el artículo…" autocomplete="off">
           <div class="sugerencias" id="pe-sug"></div></div>
         <div id="pe-items" class="lista"></div>
@@ -107,11 +109,20 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
         <div class="campo"><label for="pe-nota">Nota <span class="opc">(opcional)</span></label><input id="pe-nota" type="text" placeholder="Ej. faltó una caja, venía golpeado…"></div>
         <button type="button" class="btn grande" data-enviar>Enviar pedido</button></div>`;
     const sug = $('#pe-sug', el), lista = $('#pe-items', el);
+    const pintarTicket = () => {
+      const t = $('#pe-ticket', el);
+      const botones = `<div class="fila-botones" style="margin-top:0"><button type="button" class="btn ghost" data-ticket="foto">📷 Tomar foto</button><button type="button" class="btn ghost" data-ticket="archivo">📎 Subir imagen o PDF</button></div>`;
+      if (!ped.ticket) { t.innerHTML = `${botones}<p class="ayuda">Si te mandaron el ticket digital (WhatsApp o correo), súbelo con “Subir imagen o PDF”.</p>`; return; }
+      t.innerHTML = `${ped.esPdf ? `<p class="pdf-chip">📄 ${esc(ped.nombreArchivo || 'ticket.pdf')}</p>` : `<img class="ticket-mini" src="${ped.url}" alt="Ticket">`}${botones}`;
+    };
+    pintarTicket();
     const pintarItems = () => {
       lista.innerHTML = ped.items.length ? ped.items.map((it, i) => {
         const a = it.articulo;
         return `<div class="fila inv item-ped" data-i="${i}">${a ? miniArticulo(a, 38) : ''}<div class="fila-txt"><b>${esc(a ? a.nombre : it.nombre_nuevo + ' (nuevo)')}</b>
-          ${a && tieneEmpaque(a) ? `<span>1 ${esc(a.empaque_nombre)} = ${esc(cantidad(a.empaque_factor))} ${esc(unidadTxt(a, a.empaque_factor))}</span>` : ''}</div>
+          ${a && tieneEmpaque(a) ? `<span>1 ${esc(a.empaque_nombre)} = ${esc(cantidad(a.empaque_factor))} ${esc(unidadTxt(a, a.empaque_factor))}</span>` : ''}
+          ${it.dano ? `<span class="mal-txt">⚠️ ${esc(cantidad(it.dano.cantidad))} llegaron mal (${esc(it.dano.motivo.toLowerCase())}) · no se suman <button type="button" class="enlace" data-dano>Cambiar</button></span>`
+            : '<button type="button" class="enlace dano-btn" data-dano>⚠️ Llegó algo mal</button>'}</div>
           <div class="cant-ped"><input type="number" inputmode="decimal" min="0" step="any" value="${esc(it.cantidad ?? '')}" data-cant aria-label="Cantidad">
           ${a && tieneEmpaque(a) ? `<select data-modo aria-label="Unidad"><option value="1" ${it.en_empaques ? 'selected' : ''}>${esc(plural(a.empaque_nombre, 2))}</option><option value="0" ${!it.en_empaques ? 'selected' : ''}>${esc(unidadTxt(a, 2))}</option></select>`
             : `<span class="unidad">${esc(a ? unidadTxt(a, 2) : 'piezas')}</span>`}
@@ -140,7 +151,10 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
       const q = e.target.closest('[data-quitar]');
       if (q) { ped.items.splice(Number(q.closest('[data-i]').dataset.i), 1); pintarItems(); return; }
       if (e.target.closest('[data-nuevo]')) return nuevoArticulo();
-      if (e.target.closest('[data-ticket]')) return tomarTicket();
+      const tk = e.target.closest('[data-ticket]');
+      if (tk) return tomarTicket(tk.dataset.ticket);
+      const dn = e.target.closest('[data-dano]');
+      if (dn) return ventanaDano(ped.items[Number(dn.closest('[data-i]').dataset.i)]);
       if (e.target.closest('[data-volver]')) {
         if (!ped.items.length && !ped.ticket) return pintarInicio();
         return confirmar({ titulo: 'Cancelar pedido', texto: 'Se perderá lo que capturaste. ¿Salir?', ok: 'Salir', peligro: true }).then((ok) => { if (ok) pintarInicio(); });
@@ -169,37 +183,86 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
         ped.items.push({ nombre_nuevo: n, cantidad: c, en_empaques: false }); v.cerrar(); pintarItems();
       });
     }
-    function tomarTicket() {
+    function tomarTicket(modo) {
       const inp = document.createElement('input');
-      inp.type = 'file'; inp.accept = 'image/*'; inp.setAttribute('capture', 'environment');
+      inp.type = 'file';
+      if (modo === 'foto') { inp.accept = 'image/*'; inp.setAttribute('capture', 'environment'); } else inp.accept = 'image/*,application/pdf,.pdf';
       inp.addEventListener('change', async () => {
         const f = inp.files?.[0]; if (!f) return;
+        const pdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
         try {
-          ped.ticket = await comprimirEvidencia(f, 1600, 0.72);
+          if (pdf) {
+            if (f.size > MAX_PDF) return aviso('El PDF pesa más de 6 MB. Mándale captura de pantalla del ticket.', 'error', 6000);
+            ped.ticket = new Blob([f], { type: 'application/pdf' }); ped.esPdf = true; ped.nombreArchivo = f.name;
+          } else {
+            ped.ticket = await comprimirEvidencia(f, 1600, 0.72); ped.esPdf = false;
+          }
           if (ped.url) URL.revokeObjectURL(ped.url);
-          ped.url = URL.createObjectURL(ped.ticket);
-          $('#pe-ticket', el).innerHTML = `<img class="ticket-mini" src="${ped.url}" alt="Foto del ticket"><button type="button" class="enlace" data-ticket>Tomar otra</button>`;
-        } catch { aviso('No se pudo leer la foto. Intenta de nuevo.', 'error'); }
+          ped.url = pdf ? null : URL.createObjectURL(ped.ticket);
+          pintarTicket();
+        } catch { aviso('No se pudo leer el archivo. Intenta de nuevo.', 'error'); }
       });
       inp.click();
+    }
+    // Lo que llegó mal: no se suma a inventario y se reporta como incidencia (con foto obligatoria)
+    function ventanaDano(it) {
+      const d = it.dano || { cantidad: '', motivo: '', blob: null, url: null };
+      let blob = d.blob, url = d.url;
+      const nombre = it.articulo ? it.articulo.nombre : it.nombre_nuevo;
+      const v = ventana(`<form class="formulario" novalidate><p class="detalle">Lo que llegó mal <b>no se suma al inventario</b> y queda como incidencia para que gerencia reclame al proveedor.</p>
+        <div class="campo"><label for="dn-cant">¿Cuántas piezas de <b>${esc(nombre)}</b> llegaron mal?</label><input id="dn-cant" type="number" inputmode="decimal" min="0" step="any" value="${esc(d.cantidad)}"></div>
+        <div class="campo"><label>¿Qué les pasó?</label><div class="chips">${MOTIVOS_DANO.map((m) => `<label class="chip-sel ancho"><input type="radio" name="dn-mot" value="${esc(m)}" ${d.motivo === m ? 'checked' : ''}><span>${esc(m)}</span></label>`).join('')}</div></div>
+        <div class="campo"><label>Foto (obligatoria)</label><div id="dn-foto">${url ? `<img class="ticket-mini" src="${url}" alt="Foto">` : ''}<button type="button" class="btn ghost" data-dn-foto>📷 ${url ? 'Tomar otra' : 'Tomar foto'}</button></div></div>
+        <p class="ayuda">En “cantidad” del artículo pon solo las que llegaron bien.</p>
+        <div class="fila-botones">${it.dano ? '<button type="button" class="btn ghost" data-dn-quitar>Quitar</button>' : ''}<button class="btn" type="submit">Guardar</button></div></form>`, { titulo: '⚠️ Llegó mal' });
+      const f = $('form', v.el);
+      $('[data-dn-foto]', f).addEventListener('click', () => {
+        const inp = document.createElement('input'); inp.type = 'file'; inp.accept = 'image/*'; inp.setAttribute('capture', 'environment');
+        inp.addEventListener('change', async () => {
+          const x = inp.files?.[0]; if (!x) return;
+          try { blob = await comprimirEvidencia(x); if (url && url !== d.url) URL.revokeObjectURL(url); url = URL.createObjectURL(blob);
+            $('#dn-foto', f).innerHTML = `<img class="ticket-mini" src="${url}" alt="Foto"><button type="button" class="btn ghost" data-dn-foto>📷 Tomar otra</button>`;
+            $('[data-dn-foto]', f).addEventListener('click', () => inp.click());
+          } catch { aviso('No se pudo leer la foto.', 'error'); }
+        });
+        inp.click();
+      });
+      $('[data-dn-quitar]', f)?.addEventListener('click', () => { it.dano = null; v.cerrar(); pintarItems(); });
+      f.addEventListener('submit', (e) => {
+        e.preventDefault();
+        const c = Number($('#dn-cant', f).value), m = $('input[name=dn-mot]:checked', f)?.value;
+        if (!(c > 0)) return aviso('Escribe cuántas piezas llegaron mal.', 'error');
+        if (!m) return aviso(ERR.falta_motivo_dano, 'error');
+        if (!blob) return aviso(ERR.falta_foto_dano, 'error');
+        it.dano = { cantidad: c, motivo: m, blob, url };
+        v.cerrar(); pintarItems();
+      });
     }
     async function enviar() {
       if (!ped.ticket) return aviso(ERR.falta_ticket, 'error');
       if (!ped.items.length) return aviso(ERR.sin_articulos, 'error');
-      if (ped.items.some((i) => !(Number(i.cantidad) > 0))) return aviso(ERR.cantidad_invalida, 'error');
+      if (ped.items.some((i) => !(Number(i.cantidad) > 0) && !(i.dano && (i.cantidad === '' || Number(i.cantidad) === 0)))) return aviso(ERR.cantidad_invalida, 'error');
       try {
-        const ruta = `pedidos/${ped.id}.jpg`;
+        const ruta = `pedidos/${ped.id}.${ped.esPdf ? 'pdf' : 'jpg'}`;
         await api.subirFoto(ruta, ped.ticket, 'tickets');
+        const danos = [];
+        for (const [n, i] of ped.items.entries()) {
+          if (!i.dano) continue;
+          const rd = `pedidos/${ped.id}/dano-${n}.jpg`;
+          await api.subirFoto(rd, i.dano.blob, 'evidencias');
+          danos[n] = rd;
+        }
+        const extra = (i, n) => (i.dano ? { danadas: i.dano.cantidad, dano_motivo: i.dano.motivo, dano_foto: danos[n] } : {});
         const r = await llamar('inv_pedido_crear', {
           p_id: ped.id, p_proveedor: $('#pe-prov', el).value, p_nota: $('#pe-nota', el).value, p_ticket: ruta,
-          p_items: ped.items.map((i) => (i.articulo ? { articulo_id: i.articulo.id, cantidad: Number(i.cantidad), en_empaques: !!i.en_empaques } : { nombre_nuevo: i.nombre_nuevo, cantidad: Number(i.cantidad) })),
+          p_items: ped.items.map((i, n) => ({ ...(i.articulo ? { articulo_id: i.articulo.id, cantidad: Number(i.cantidad) || 0, en_empaques: !!i.en_empaques } : { nombre_nuevo: i.nombre_nuevo, cantidad: Number(i.cantidad) || 0 }), ...extra(i, n) })),
         });
         if (!r.ok) return aviso(msg(r), 'error');
         if (r.notificacion_id) api.avisar(r.notificacion_id);
         if (ped.url) URL.revokeObjectURL(ped.url);
-        aviso('Pedido enviado. Gerencia ya fue avisada.', 'ok', 4000);
+        aviso(r.danados ? 'Pedido enviado. Lo que llegó mal quedó como incidencia y gerencia ya fue avisada.' : 'Pedido enviado. Gerencia ya fue avisada.', 'ok', 5000);
         vista = 'inicio'; await cargar();
-      } catch (err) { aviso(err.codigo === 'sin_conexion' ? ERR.sin_conexion : `No se pudo subir la foto del ticket (${err.message || 'error'}).`, 'error', 7000); }
+      } catch (err) { aviso(err.codigo === 'sin_conexion' ? ERR.sin_conexion : `No se pudo subir el ticket o las fotos (${err.message || 'error'}).`, 'error', 7000); }
     }
   }
 

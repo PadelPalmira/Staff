@@ -4,7 +4,7 @@ import * as api from '../api.js';
 import { montarInventarioEmp } from './inventario_emp.js';
 import { montarPendientesEmp } from './pendientes_emp.js';
 import { encolar, enviarCola, pendientesDe, alCambiarCola } from '../cola.js';
-import { esc, $, $$, avatar, hidratarAvatares, aviso, ventana, confirmar, conOcupado, primerNombre, horaCorta, comprimirEvidencia, duracionTexto, ROL, mostrarError, quitarError } from '../ui.js';
+import { esc, $, $$, avatar, hidratarAvatares, aviso, ventana, confirmar, conOcupado, primerNombre, horaCorta, comprimirEvidencia, duracionTexto, ROL, mostrarError, quitarError, pesos } from '../ui.js';
 
 const TZ = 'America/Mexico_City';
 const ERR = {
@@ -16,8 +16,13 @@ const ERR = {
   no_es_para_ti: 'Esa solicitud es para otro compañero.', sin_turno: 'No tienes un turno abierto.', mismo: 'Ese turno ya es tuyo.', perfil_invalido: 'Ese compañero ya no está activo.',
   sin_conexion: 'No hay internet. Revisa la conexión e intenta de nuevo.',
   auto_loyverse: 'Esta tarea se marca sola cuando Loyverse registra la caja. No se puede marcar a mano.',
+  falta_motivo: 'Escribe el motivo (mínimo 3 letras).', fecha_invalida: 'Elige un día de aquí al domingo.', ya_pedida: 'Ya pediste mover esta tarea; espera a gerencia.',
+  no_se_mueve: 'Esta tarea no se puede mover.', ya_no_pendiente: 'La tarea ya no está pendiente.', no_es_tu_caja: 'Ese cierre de caja no es de tu turno.',
+  ya_revisada: 'Gerencia ya revisó ese descuadre.',
 };
 const AUTO_TXT = { caja_abierta: 'abras la caja', caja_cerrada: 'cierres la caja' };
+const fechaTxt = (f) => new Date(`${f}T12:00:00Z`).toLocaleDateString('es-MX', { weekday: 'short', day: 'numeric', month: 'short', timeZone: 'UTC' });
+const TIPO_TXT = { manana: 'Mañana', tarde: 'Tarde', domingo: 'Domingo' };
 const msg = (r) => ERR[r?.error] || r?.mensaje || 'No se pudo completar. Intenta de nuevo.';
 const SECCIONES = [['apertura', 'Al abrir el turno'], ['semanal', 'Semanales de hoy'], ['cierre', 'Al cerrar el turno']];
 const ICONO_TURNO = { manana: '☀️', tarde: '🌇', domingo: '☀️' };
@@ -139,6 +144,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     if (tab === 'inicio' && (!desemp || Date.now() - desempEn > 600000)) cargarDesempeno();
     if (!plan || Date.now() - planEn > 600000) cargarPlan();
     pintar();
+    revisarCaja();
   }
   // Calendario: tus próximos turnos y quién está hoy
   let plan = null, planEn = 0;
@@ -423,7 +429,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
   // ---------- Tareas ----------
   function metaTarea(x) {
     const cola = x._cola ? ' · <span class="warn-txt">⏳ por enviar</span>' : '';
-    if (x.estado === 'excusada') return '<span class="ok-txt">Excusada por gerencia</span>';
+    if (x.estado === 'excusada') return `<span class="ok-txt">${x.mover?.estado === 'aprobada' || x.mover?.estado === 'aplicada' ? `📅 ${esc(x.excusa_motivo || 'Se movió a otro día')}` : 'Excusada por gerencia'}</span>`;
     if (x.estado === 'hecha') return `<span class="${x.a_tiempo ? 'ok-txt' : 'warn-txt'}">✓ ${esc(horaCorta(x.marcada_en))} · ${x.a_tiempo ? 'a tiempo' : 'fuera de tiempo'}</span>${x.foto_path ? ' · 📷' : ''}${cola}`;
     if (x.estado === 'no_se_pudo') return `<span class="warn-txt">⚠ No se pudo · ${esc(horaCorta(x.marcada_en))} · se avisó a gerencia</span>${cola}`;
     if (x.estado === 'no_aplica') return `<span class="ok-txt">${esc(x.etiqueta_no_aplica || 'No aplica hoy')} · ${esc(horaCorta(x.marcada_en))}</span>${cola}`;
@@ -431,6 +437,8 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     if (x.incidencia_id) partes.push('Escribe cómo sigue');
     if (x.limite) partes.push(vencida(x) ? `<span class="mal-txt">Venció a las ${esc(horaCorta(x.limite))}</span>` : `Antes de las ${esc(horaCorta(x.limite))}`);
     if (x.requiere_foto) partes.push('📷 pide foto');
+    if (x.mover?.estado === 'pendiente') partes.push(`<span class="warn-txt">📅 Pediste moverla al ${esc(fechaTxt(x.mover.fecha))} · esperando a gerencia</span>`);
+    if (x.mover?.estado === 'rechazada') partes.push(`<span class="mal-txt">📅 Gerencia no aprobó moverla${x.mover.nota ? `: ${esc(x.mover.nota)}` : ''}</span>`);
     return partes.join(' · ') + cola;
   }
   function filaTarea(x) {
@@ -444,7 +452,8 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
         ${x.razon && (x.estado === 'pendiente' || nsp || inc) ? `<span class="tarea-meta">${inc ? 'Reporte' : 'Razón'}: ${esc(x.razon)}</span>` : ''}
         ${!listo ? `<span class="tarea-botones">${inc ? '<button type="button" class="chip" data-a="reportar">Reportar</button><button type="button" class="chip" data-a="arreglado">Ya se arregló</button>'
           : `${x.condicional ? `<button type="button" class="chip" data-a="noaplica">${esc(x.etiqueta_no_aplica || 'No aplica hoy')}</button>` : ''}
-          <button type="button" class="chip" data-a="nopuedo">No se puede</button>`}</span>` : ''}</div></div>`;
+          <button type="button" class="chip" data-a="nopuedo">No se puede</button>
+          ${x.momento === 'semanal' && est.mover_dias?.length && x.mover?.estado !== 'pendiente' ? '<button type="button" class="chip" data-a="mover">📅 Pedir moverla</button>' : ''}`}</span>` : ''}</div></div>`;
   }
   // Tareas que marca Loyverse (abrir/cerrar caja): nadie las puede marcar a mano
   function filaAuto(x, listo, nsp) {
@@ -456,7 +465,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     return `<div class="tarea auto ${listo ? 'lista' : ''} ${nsp ? 'nosepudo' : ''} ${!listo && vencida(x) ? 'vencida' : ''}" data-id="${esc(x.id)}">
       <span class="tarea-check candado" aria-hidden="true">${hecha ? '✓' : nsp ? '!' : '🔒'}</span>
       <div class="tarea-txt"><b>${esc(x.nombre)}</b><span class="tarea-meta">${meta}</span>
-        ${x.estado === 'pendiente' || nsp ? `<span class="tarea-botones"><button type="button" class="chip" data-a="sync">🔄 Ya lo hice en Loyverse</button>
+        ${x.estado === 'pendiente' || nsp ? `<span class="tarea-botones"><button type="button" class="chip" data-a="sync">${x.auto === 'caja_cerrada' ? '🔄 Ya cerré la caja' : '🔄 Ya lo hice en Loyverse'}</button>
           ${nsp ? '' : '<button type="button" class="chip" data-a="nopuedo">No se puede</button>'}</span>` : ''}</div></div>`;
   }
   // Pide a Loyverse los datos nuevos y vuelve a revisar unas veces
@@ -583,6 +592,72 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     });
   }
 
+  // ---------- pedir mover una tarea a otro día de esta semana ----------
+  function ventanaMoverTarea(x) {
+    const dias = est.mover_dias || [];
+    if (!dias.length) return aviso('Ya no quedan días esta semana para moverla.', 'info');
+    const v = ventana(`<form class="formulario" novalidate>
+      <p class="detalle">Pide pasar <b>${esc(x.nombre)}</b> a otro día de esta semana. Gerencia lo aprueba; mientras tanto sigue siendo tarea de hoy.</p>
+      <div class="campo"><label>¿Qué día?</label><div class="chips">${dias.map((d, i) => `<label class="chip-sel ancho"><input type="radio" name="mv-dia" value="${i}" ${i === 0 ? 'checked' : ''}><span>${esc(d.texto)}</span></label>`).join('')}</div></div>
+      <div class="campo"><label>¿En qué turno?</label><div class="chips" id="mv-tipos"></div></div>
+      <div class="campo"><label for="mv-mot">¿Por qué?</label><textarea id="mv-mot" rows="2" placeholder="Ej. las macetas siguen húmedas"></textarea></div>
+      <button class="btn" type="submit">Pedir a gerencia</button></form>`, { titulo: '📅 Mover a otro día' });
+    const f = $('form', v.el);
+    const pintarTipos = () => {
+      const d = dias[Number($('input[name=mv-dia]:checked', f).value)];
+      $('#mv-tipos', f).innerHTML = (d.tipos || []).map((t, i) => `<label class="chip-sel ancho"><input type="radio" name="mv-tipo" value="${esc(t.clave)}" ${i === 0 ? 'checked' : ''}><span>${esc(t.nombre)}</span></label>`).join('');
+    };
+    pintarTipos();
+    f.addEventListener('change', (e) => { if (e.target.name === 'mv-dia') pintarTipos(); });
+    f.addEventListener('submit', (e) => {
+      e.preventDefault(); quitarError(f);
+      const d = dias[Number($('input[name=mv-dia]:checked', f).value)], tipo = $('input[name=mv-tipo]:checked', f)?.value, mot = $('#mv-mot', f).value.trim();
+      if (mot.length < 3) return mostrarError(f, ERR.falta_motivo);
+      if (!tipo) return mostrarError(f, 'Elige el turno.');
+      conOcupado($('button[type=submit]', f), async () => {
+        const r = await llamar('tarea_mover_pedir', { p_tarea: x.id, p_fecha: d.fecha, p_tipo: tipo, p_motivo: mot });
+        if (!r.ok) return aviso(msg(r), 'error');
+        if (r.notificacion_id) api.avisar(r.notificacion_id);
+        const i = est.mio.tareas.findIndex((q) => q.id === x.id);
+        if (i >= 0 && r.tarea) est.mio.tareas[i] = r.tarea;
+        v.cerrar(); pintar(); aviso('Listo. Gerencia ya tiene tu solicitud.', 'ok');
+      });
+    });
+  }
+
+  // ---------- resultado del cierre de caja (Loyverse) ----------
+  const cajasVistas = new Set();
+  function revisarCaja() {
+    const c = est?.caja;
+    if (!c || !est.mio || cajasVistas.has(c.id)) return;
+    cajasVistas.add(c.id);
+    ventanaCaja(c);
+  }
+  function ventanaCaja(c, despues) {
+    const d = Number(c.diferencia || 0), cuadra = Math.abs(d) < 0.005;
+    const txt = cuadra ? '<div class="exito"><div class="palomita" aria-hidden="true">✓</div><h2>Caja cuadrada</h2><p class="detalle">Loyverse no tiene diferencias. ¡Bien!</p></div>'
+      : `<div class="caja-res ${c.pide_razon ? 'mal' : ''}"><span aria-hidden="true">${c.pide_razon ? '⚠️' : 'ℹ️'}</span><div><b>Descuadre: ${d < 0 ? 'faltan' : 'sobran'} ${pesos(Math.abs(d))}</b>
+        <p>${c.pide_razon ? 'Ya se le notificó a gerencia.' : `Es poquito (hasta ${pesos(c.margen)}): queda anotado, no tienes que hacer nada.`}</p></div></div>`;
+    const pide = c.pide_razon && !c.razon;
+    const v = ventana(`${txt}${pide ? `<form class="formulario" novalidate><div class="campo"><label for="cj-raz">¿Por qué crees que hay descuadre?</label>
+        <textarea id="cj-raz" rows="3" placeholder="Ej. no había cambio y faltaron monedas; se dio cambio de más…"></textarea>
+        <p class="ayuda">Es obligatorio para cerrar tu turno. Gerencia decide si se perdona.</p></div><button class="btn grande" type="submit">Enviar razón</button></form>`
+      : `${c.razon ? `<p class="detalle">Tu razón: “${esc(c.razon)}”</p>` : ''}<div class="acciones"><button type="button" class="btn" data-cerrar>Entendido</button></div>`}`,
+    { titulo: 'Cierre de caja', alCerrar: () => { if (!pide) despues?.(); } });
+    $('form', v.el)?.addEventListener('submit', (e) => {
+      e.preventDefault(); quitarError(v.el);
+      const raz = $('#cj-raz', v.el).value.trim();
+      if (raz.length < 3) return mostrarError($('form', v.el), 'Escribe la razón (mínimo 3 letras).');
+      conOcupado($('button[type=submit]', v.el), async () => {
+        const r = await llamar('caja_razon', { p_caja: c.id, p_razon: raz });
+        if (!r.ok) return aviso(msg(r), 'error');
+        if (r.notificacion_id) api.avisar(r.notificacion_id);
+        if (est.caja && est.caja.id === c.id) est.caja.razon = raz;
+        v.cerrar(); aviso('Razón enviada a gerencia.', 'ok'); despues?.();
+      });
+    });
+  }
+
   // ---------- relevo ----------
   async function relevoLeido() {
     const r = await llamar('turno_relevo_leido', { p_turno_id: est.relevo.turno_id });
@@ -622,13 +697,20 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
           const falta = est.mio.tareas.find((x) => x.auto === 'caja_cerrada' && x.estado === 'pendiente');
           if (falta && !await confirmar({ titulo: 'Falta cerrar la caja', texto: 'Loyverse todavía no registra el cierre de caja. Primero cierra la caja en el iPad (Loyverse) y luego cierra tu turno. Si cierras tu turno ahora, la tarea queda “sin hacer”.', ok: 'Cerrar turno de todos modos' })) return;
         }
-        const r = await llamar('turno_cerrar', { p_turno_id: est.mio.id, p_razones: {}, p_forzar: false });
-        if (muerto) return;
-        if (r.ok) { v.cerrar(); return terminado(r.turno); }
-        if (r.error === 'faltan') { v.cerrar(); return ventanaFaltan(r.pendientes); }
-        aviso(msg(r), 'error');
+        await intentarCerrar(v);
       });
     });
+  }
+  async function intentarCerrar(v) {
+    const r = await llamar('turno_cerrar', { p_turno_id: est.mio.id, p_razones: {}, p_forzar: false });
+    if (muerto) return;
+    if (r.ok) { v?.cerrar(); return terminado(r.turno); }
+    if (r.error === 'caja_razon') {
+      v?.cerrar(); cajasVistas.add(r.caja.id);
+      return ventanaCaja({ ...r.caja, margen: est.caja?.margen }, () => { if (est.mio) intentarCerrar(null); });
+    }
+    if (r.error === 'faltan') { v?.cerrar(); return ventanaFaltan(r.pendientes); }
+    aviso(msg(r), 'error');
   }
   function ventanaFaltan(pend) {
     const v = ventana(`<form class="formulario" novalidate>
@@ -645,6 +727,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
       $$('[data-razon]', form).forEach((i) => { if (i.value.trim()) razones[i.dataset.razon] = i.value.trim(); });
       conOcupado($('button[type=submit]', form), async () => {
         const r = await llamar('turno_cerrar', { p_turno_id: est.mio.id, p_razones: razones, p_forzar: true });
+        if (!r.ok && r.error === 'caja_razon') { v.cerrar(); return ventanaCaja(r.caja, () => { if (est.mio) intentarCerrar(null); }); }
         if (!r.ok) return aviso(msg(r), 'error');
         v.cerrar(); terminado(r.turno);
       });
@@ -732,6 +815,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     if (a === 'arreglado') return ventanaIncidencia(x, true);
     if (a === 'noaplica') return conOcupado(b, () => marcar(x.id, 'no_aplica'));
     if (a === 'nopuedo') return ventanaNoPuedo(x);
+    if (a === 'mover') return ventanaMoverTarea(x);
     if (a === 'quitar') {
       return confirmar({ titulo: 'Quitar marca', texto: `¿Quitar la marca de "${x.nombre}"? Vuelve a quedar pendiente.`, ok: 'Quitar marca' }).then((ok) => { if (ok) marcar(x.id, 'deshacer'); });
     }

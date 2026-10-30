@@ -2,14 +2,16 @@
 import * as api from '../api.js';
 import { esc, $, $$, aviso, ventana, conOcupado } from '../ui.js';
 
-const COLS = 'id,nombre,descripcion,momento,aplica,turnos,dias,regla,minutos,hora,foto,condicional,etiqueta_no_aplica,activa,orden';
+const COLS = 'id,nombre,descripcion,momento,aplica,turnos,dias,horario,regla,minutos,hora,foto,condicional,etiqueta_no_aplica,activa,orden';
+const TIPOS_DEF = [{ clave: 'manana', nombre: 'Mañana', dias: [1, 2, 3, 4, 5, 6] }, { clave: 'tarde', nombre: 'Tarde', dias: [1, 2, 3, 4, 5, 6] }, { clave: 'domingo', nombre: 'Domingo', dias: [7] }];
+const CORTO = { manana: 'mañana', tarde: 'tarde', domingo: 'domingo' };
 const MOMENTOS = [['apertura', 'Al abrir el turno'], ['semanal', 'Semanales'], ['cierre', 'Al cerrar el turno']];
 const DIAS = [[1, 'L'], [2, 'M'], [3, 'M'], [4, 'J'], [5, 'V'], [6, 'S'], [7, 'D']];
 const DIAS_LARGO = ['', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb', 'dom'];
 const TURNOS = [['manana', 'Mañana'], ['tarde', 'Tarde'], ['domingo', 'Domingo']];
 const ERR = {
   nombre_invalido: 'Ponle un nombre a la tarea.', minutos_invalidos: 'Escribe cuántos minutos después de abrir.', hora_invalida: 'Escribe la hora límite.',
-  faltan_dias: 'Elige al menos un día para la tarea semanal.', sin_permiso: 'No tienes permiso para esto.', datos_invalidos: 'Revisa los datos.',
+  faltan_dias: 'Elige al menos un día y su turno.', sin_permiso: 'No tienes permiso para esto.', datos_invalidos: 'Revisa los datos.',
 };
 
 function resumenRegla(t) {
@@ -20,13 +22,26 @@ function resumenRegla(t) {
 }
 function resumenQuien(t) {
   const q = t.aplica === 'primero' ? 'quien abre el día' : t.aplica === 'ultimo' ? 'quien cierra el día' : 'todos';
+  if (t.horario) return `${q} · ${resumenHorario(t.horario)}`;
   const tn = t.turnos?.length ? ` · turno ${t.turnos.map((c) => (TURNOS.find((x) => x[0] === c) || [0, c])[1].toLowerCase()).join(' y ')}` : '';
   return q + tn;
+}
+// {"2":["manana"],"6":["tarde"]} → "mar mañana · sáb tarde"
+export function resumenHorario(h) {
+  const ks = Object.keys(h || {}).map(Number).sort((a, b) => a - b);
+  if (!ks.length) return 'ningún día';
+  const txt = (d) => (h[d] || []).map((c) => CORTO[c] || c).join(' y ');
+  const iguales = ks.every((d) => txt(d) === txt(ks[0]));
+  if (iguales && ks.length >= 6) return `diario · ${txt(ks[0])}`;
+  if (iguales) return `${ks.map((d) => DIAS_LARGO[d]).join(', ')} · ${txt(ks[0])}`;
+  return ks.map((d) => `${DIAS_LARGO[d]} ${txt(d)}`).join(' · ');
 }
 
 export async function montarTareasAdmin(el, ctx, yo) {
   let tareas = [];
-  el.innerHTML = `<div class="enc-seccion"><h2>Tareas</h2><button type="button" class="btn chico" data-nueva>＋ Nueva</button></div>
+  let tipos = TIPOS_DEF, ordenando = false;
+  api.seleccionar('tipos_turno', 'select=clave,nombre,dias,orden&activo=eq.true&order=orden.asc').then((l) => { if (l?.length) tipos = l; }).catch(() => {});
+  el.innerHTML = `<div class="enc-seccion"><h2>Tareas</h2><div class="fila-botones" style="margin:0"><button type="button" class="btn chico ghost" data-ordenar>↕ Ordenar</button><button type="button" class="btn chico" data-nueva>＋ Nueva</button></div></div>
     <p class="sub">Esto es lo que ve el personal en su checklist. Los cambios aplican a los turnos que se abran desde ahora; los turnos ya abiertos no cambian.</p>
     <section class="tarjeta tarjeta-avisos" id="tareas-problema" hidden></section>
     <div id="lista-tareas-cfg"><p class="cargando">Cargando…</p></div>
@@ -94,15 +109,40 @@ export async function montarTareasAdmin(el, ctx, yo) {
     pintar();
   }
   function pintar() {
+    if (ordenando) return pintarOrden();
     let h = '';
     for (const [mom, titulo] of MOMENTOS) {
       const l = tareas.filter((t) => t.momento === mom);
       if (!l.length) continue;
       h += `<h3 class="sub-titulo">${titulo}</h3><div class="lista">${l.map((t) => `<button type="button" class="fila ${t.activa ? '' : 'apagada'}" data-id="${esc(t.id)}">
-        <div class="fila-txt"><b>${esc(t.nombre)}</b><span>${esc(resumenRegla(t))} · ${esc(resumenQuien(t))}${t.momento === 'semanal' && t.dias ? ` · ${t.dias.map((d) => DIAS_LARGO[d]).join(', ')}` : ''}</span></div>
+        <div class="fila-txt"><b>${esc(t.nombre)}</b><span>${esc(resumenRegla(t))} · ${esc(resumenQuien(t))}${!t.horario && t.momento === 'semanal' && t.dias ? ` · ${t.dias.map((d) => DIAS_LARGO[d]).join(', ')}` : ''}</span></div>
         <div class="fila-ins">${t.activa ? '' : '<span class="insignia gris">Apagada</span>'}${t.foto ? '<span>📷</span>' : ''}${t.condicional ? '<span class="insignia aviso-i">Condicional</span>' : ''}</div></button>`).join('')}</div>`;
     }
     cont.innerHTML = h || '<div class="tarjeta vacio"><p><b>No hay tareas.</b></p><p>Toca “Nueva” para crear la primera.</p></div>';
+  }
+  // Modo ordenar: flechas ↑↓ dentro de cada sección; el orden es el que ve el personal
+  function pintarOrden() {
+    let h = '<p class="nota-aviso">↕ Mueve con las flechas y toca “Guardar orden”. El personal las ve en este orden a partir del siguiente turno.</p>';
+    for (const [mom, titulo] of MOMENTOS) {
+      const l = tareas.filter((t) => t.momento === mom);
+      if (!l.length) continue;
+      h += `<h3 class="sub-titulo">${titulo}</h3><div class="lista">${l.map((t, i) => `<div class="fila inv orden-fila ${t.activa ? '' : 'apagada'}" data-oid="${esc(t.id)}">
+        <span class="orden-n">${i + 1}</span><div class="fila-txt"><b>${esc(t.nombre)}</b></div>
+        <div class="orden-btns"><button type="button" class="icono-btn" data-sube aria-label="Subir" ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button type="button" class="icono-btn" data-baja aria-label="Bajar" ${i === l.length - 1 ? 'disabled' : ''}>↓</button></div></div>`).join('')}</div>`;
+    }
+    h += `<div class="fila-botones orden-acciones"><button type="button" class="btn ghost" data-orden-cancelar>Cancelar</button><button type="button" class="btn" data-orden-guardar>Guardar orden</button></div>`;
+    cont.innerHTML = h;
+  }
+  function mover(id, delta) {
+    const t = tareas.find((x) => x.id === id);
+    const l = tareas.filter((x) => x.momento === t.momento);
+    const i = l.indexOf(t), j = i + delta;
+    if (j < 0 || j >= l.length) return;
+    const a = tareas.indexOf(l[i]), b = tareas.indexOf(l[j]);
+    [tareas[a], tareas[b]] = [tareas[b], tareas[a]];
+    pintarOrden();
+    cont.querySelector(`[data-oid="${CSS.escape(id)}"] ${delta < 0 ? '[data-sube]' : '[data-baja]'}`)?.focus();
   }
 
   function formulario(t) {
@@ -112,14 +152,20 @@ export async function montarTareasAdmin(el, ctx, yo) {
       <div class="campo"><label for="t-nombre">Nombre de la tarea</label><input id="t-nombre" type="text" value="${esc(t.nombre)}" placeholder="Ej. Revisar baños"></div>
       <div class="campo"><label for="t-desc">Notas para el personal <span class="opc">(opcional)</span></label><input id="t-desc" type="text" value="${esc(t.descripcion || '')}"></div>
       <div class="campo"><label for="t-mom">¿Cuándo se hace?</label><select id="t-mom">${MOMENTOS.map(([k, n]) => `<option value="${k}" ${t.momento === k ? 'selected' : ''}>${n}</option>`).join('')}</select></div>
-      <div class="campo" id="g-dias" ${t.momento === 'semanal' ? '' : 'hidden'}><label>Días de la semana</label>
-        <div class="chips">${DIAS.map(([n, l]) => `<label class="chip-sel"><input type="checkbox" name="dia" value="${n}" ${t.dias?.includes(n) ? 'checked' : ''}><span>${l}<small>${DIAS_LARGO[n]}</small></span></label>`).join('')}</div></div>
+      <div class="campo"><label>¿Qué días y en qué turno?</label>
+        <div class="chips" id="g-modo"><label class="chip-sel ancho"><input type="radio" name="hmodo" value="todos" ${t.horario ? '' : 'checked'}><span>Todos los días</span></label>
+          <label class="chip-sel ancho"><input type="radio" name="hmodo" value="elegir" ${t.horario ? 'checked' : ''}><span>Elegir días y turno</span></label></div>
+        <div class="horario-grid" id="g-horario">${DIAS.map(([n]) => {
+          const ts = tipos.filter((x) => (x.dias || []).includes(n));
+          const sel = t.horario?.[n] || [];
+          const val = !sel.length ? '' : sel.length === ts.length && ts.length > 1 ? '*' : sel[0];
+          const ops = [['', '—'], ...ts.map((x) => [x.clave, x.nombre.replace(/\s*\(.*\)/, '')]), ...(ts.length > 1 ? [['*', 'Ambos']] : [])];
+          return `<div class="hg-fila"><span class="hg-dia">${DIAS_LARGO[n]}</span><div class="hg-ops">${ops.map(([k, nom]) => `<label class="hg-op ${k ? '' : 'hg-no'}"><input type="radio" name="h${n}" value="${esc(k)}" ${val === k ? 'checked' : ''}><span>${esc(nom)}</span></label>`).join('')}</div></div>`;
+        }).join('')}<p class="ayuda" id="g-hora-aviso" hidden>Si la hora límite no cae dentro de un turno (ej. 14:30 en la tarde), ese día cuenta “antes de la hora de salida”.</p></div></div>
       <div class="campo"><label for="t-apl">¿Quién la hace?</label><select id="t-apl">
         <option value="todos" ${t.aplica === 'todos' ? 'selected' : ''}>Todos los turnos</option>
         <option value="primero" ${t.aplica === 'primero' ? 'selected' : ''}>Solo quien abre el día (turno de la mañana)</option>
         <option value="ultimo" ${t.aplica === 'ultimo' ? 'selected' : ''}>Solo quien cierra el día (turno de la tarde)</option></select></div>
-      <div class="campo"><label>Turnos donde aparece <span class="opc">(si no marcas ninguno, en todos)</span></label>
-        <div class="chips">${TURNOS.map(([k, n]) => `<label class="chip-sel ancho"><input type="checkbox" name="turno" value="${k}" ${t.turnos?.includes(k) ? 'checked' : ''}><span>${n}</span></label>`).join('')}</div></div>
       <div class="campo"><label for="t-reg">Tiempo límite</label><select id="t-reg">
         <option value="sin_limite" ${t.regla === 'sin_limite' ? 'selected' : ''}>Sin límite</option>
         <option value="desde_apertura" ${t.regla === 'desde_apertura' ? 'selected' : ''}>Minutos después de abrir el turno</option>
@@ -130,12 +176,15 @@ export async function montarTareasAdmin(el, ctx, yo) {
       <label class="interruptor"><input type="checkbox" id="t-foto" ${t.foto ? 'checked' : ''}><span>Pide una foto como evidencia</span></label>
       <label class="interruptor"><input type="checkbox" id="t-cond" ${t.condicional ? 'checked' : ''}><span>Puede “no aplicar” (ej. “no hubo clases hoy”)</span></label>
       <div class="campo" id="g-etq" hidden><label for="t-etq">Texto del botón “no aplica”</label><input id="t-etq" type="text" value="${esc(t.etiqueta_no_aplica || '')}" placeholder="No aplica hoy"></div>
-      <div class="campo"><label for="t-ord">Orden en la lista <span class="opc">(número chico = sale primero)</span></label><input id="t-ord" type="number" inputmode="numeric" value="${t.orden ?? 100}"></div>
       <label class="interruptor"><input type="checkbox" id="t-act" ${t.activa ? 'checked' : ''}><span>Tarea activa (si la apagas, deja de aparecer en turnos nuevos)</span></label>
       <button class="btn" type="submit">${nueva ? 'Crear tarea' : 'Guardar cambios'}</button></form>`, { titulo: nueva ? 'Nueva tarea' : 'Editar tarea' });
     const f = $('form', v.el);
     const sync = () => {
-      $('#g-dias', f).hidden = $('#t-mom', f).value !== 'semanal';
+      const sem = $('#t-mom', f).value === 'semanal';
+      if (sem) $('input[name=hmodo][value=elegir]', f).checked = true;
+      $('input[name=hmodo][value=todos]', f).disabled = sem;
+      $('#g-horario', f).hidden = $('input[name=hmodo]:checked', f).value !== 'elegir';
+      $('#g-hora-aviso', f).hidden = $('#t-reg', f).value !== 'hora_fija';
       $('#g-min', f).hidden = $('#t-reg', f).value !== 'desde_apertura';
       $('#g-hora', f).hidden = $('#t-reg', f).value !== 'hora_fija';
       $('#g-etq', f).hidden = !$('#t-cond', f).checked;
@@ -145,11 +194,15 @@ export async function montarTareasAdmin(el, ctx, yo) {
       e.preventDefault();
       const datos = {
         nombre: $('#t-nombre', f).value, descripcion: $('#t-desc', f).value, momento: $('#t-mom', f).value, aplica: $('#t-apl', f).value,
-        turnos: $$('input[name=turno]:checked', f).map((i) => i.value), dias: $$('input[name=dia]:checked', f).map((i) => Number(i.value)),
+        horario: $('input[name=hmodo]:checked', f).value === 'elegir' ? Object.fromEntries(DIAS.map(([n]) => {
+          const v = $(`input[name=h${n}]:checked`, f)?.value || '';
+          const ts = tipos.filter((x) => (x.dias || []).includes(n)).map((x) => x.clave);
+          return [n, v === '*' ? ts : v ? [v] : []];
+        }).filter(([, l]) => l.length)) : null,
         regla: $('#t-reg', f).value, minutos: $('#t-min', f).value, hora: $('#t-hora', f).value, foto: $('#t-foto', f).checked,
-        condicional: $('#t-cond', f).checked, etiqueta_no_aplica: $('#t-etq', f).value, activa: $('#t-act', f).checked, orden: Number($('#t-ord', f).value) || 100,
+        condicional: $('#t-cond', f).checked, etiqueta_no_aplica: $('#t-etq', f).value, activa: $('#t-act', f).checked,
       };
-      if (datos.momento !== 'semanal') datos.dias = [];
+      if (datos.horario && !Object.keys(datos.horario).length) return aviso('Elige al menos un día y su turno.', 'error');
       conOcupado($('button[type=submit]', f), async () => {
         try {
           const r = await api.rpc('tarea_plantilla_guardar', { p_id: nueva ? null : t.id, p_datos: datos });
@@ -161,7 +214,22 @@ export async function montarTareasAdmin(el, ctx, yo) {
   }
 
   $('[data-nueva]', el).addEventListener('click', () => formulario(null));
+  $('[data-ordenar]', el).addEventListener('click', () => { ordenando = !ordenando; pintar(); });
   cont.addEventListener('click', (e) => {
+    if (ordenando) {
+      const f = e.target.closest('[data-oid]');
+      if (f && e.target.closest('[data-sube]')) return mover(f.dataset.oid, -1);
+      if (f && e.target.closest('[data-baja]')) return mover(f.dataset.oid, 1);
+      if (e.target.closest('[data-orden-cancelar]')) { ordenando = false; return cargar(); }
+      const g = e.target.closest('[data-orden-guardar]');
+      if (g) return conOcupado(g, async () => {
+        const ids = MOMENTOS.flatMap(([m]) => tareas.filter((t) => t.momento === m).map((t) => t.id));
+        let r; try { r = await api.rpc('tareas_ordenar', { p_ids: ids }); } catch (err) { r = { ok: false, mensaje: err.message }; }
+        if (!r.ok) return aviso(r.mensaje || 'No se pudo guardar el orden.', 'error');
+        ordenando = false; aviso('Orden guardado. Aplica desde el siguiente turno.', 'ok'); cargar();
+      });
+      return;
+    }
     const b = e.target.closest('[data-id]');
     if (b) formulario(tareas.find((t) => t.id === b.dataset.id));
   });

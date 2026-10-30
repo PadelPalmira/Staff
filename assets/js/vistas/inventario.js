@@ -78,7 +78,7 @@ async function segPedidos(el, recargar) {
   let peds, arts;
   try {
     [peds, arts] = await Promise.all([
-      api.seleccionar('inv_pedidos', 'select=id,creado_en,perfil_nombre,proveedor,nota,ticket_path,estado,comentario,verificado_en,cargado_en,lv_error,inv_pedido_items(id,articulo_id,nombre_nuevo,cantidad,en_empaques,unidades,quitado,cantidad_original,unidades_original)&order=creado_en.desc&limit=60'),
+      api.seleccionar('inv_pedidos', 'select=id,creado_en,perfil_nombre,proveedor,nota,ticket_path,estado,comentario,verificado_en,cargado_en,lv_error,inv_pedido_items(id,articulo_id,nombre_nuevo,cantidad,en_empaques,unidades,quitado,cantidad_original,unidades_original),inv_pedido_danos(id,nombre,cantidad,motivo,foto_path)&order=creado_en.desc&limit=60'),
       articulos(),
     ]);
   } catch (e) { el.innerHTML = `<div class="tarjeta vacio"><p>${esc(e.message)}</p></div>`; return; }
@@ -89,7 +89,7 @@ async function segPedidos(el, recargar) {
     const nuevos = its.filter((i) => !i.articulo_id).length;
     const ins = { enviado: '<span class="insignia aviso-i">Por verificar</span>', verificado: `<span class="insignia ${p.lv_error ? 'mal' : ''}">${p.lv_error ? 'Falta subir' : 'Verificado'}</span>`, cargado: '<span class="insignia gris">En Loyverse</span>', cancelado: '<span class="insignia mal">Cancelado</span>' }[p.estado];
     return `<button type="button" class="fila" data-ped="${esc(p.id)}"><div class="fila-txt"><b>${esc(p.perfil_nombre)}${p.proveedor ? ` · ${esc(p.proveedor)}` : ''}</b>
-      <span>${esc(fechaHora(p.creado_en))} · ${its.length} artículo${its.length === 1 ? '' : 's'}${nuevos ? ` · <span class="warn-txt">${nuevos} nuevo${nuevos === 1 ? '' : 's'}</span>` : ''}</span></div>${ins}</button>`;
+      <span>${esc(fechaHora(p.creado_en))} · ${its.length} artículo${its.length === 1 ? '' : 's'}${nuevos ? ` · <span class="warn-txt">${nuevos} nuevo${nuevos === 1 ? '' : 's'}</span>` : ''}${(p.inv_pedido_danos || []).length ? ` · <span class="mal-txt">⚠️ llegó algo mal</span>` : ''}</span></div>${ins}</button>`;
   }
   if (!peds.length) { el.innerHTML = '<p class="detalle" style="margin:4px 0 12px">📦 No hay pedidos recibidos todavía. El personal los registra desde el celular del club (Inventario › Recibir pedido).</p>'; return; }
   el.innerHTML = grupo('Por verificar', peds.filter((p) => p.estado === 'enviado'), '<p class="ayuda">Compara lo capturado contra la foto del ticket.</p>')
@@ -107,7 +107,10 @@ async function verPedido(p, arts, mapa, alCambiar) {
     v.poner(`<dl class="datos"><dt>Recibió</dt><dd>${esc(p.perfil_nombre)} · ${esc(fechaHora(p.creado_en))}</dd>
         ${p.proveedor ? `<dt>Proveedor</dt><dd>${esc(p.proveedor)}</dd>` : ''}${p.nota ? `<dt>Nota</dt><dd>${esc(p.nota)}</dd>` : ''}
         ${p.comentario ? `<dt>Comentario</dt><dd>${esc(p.comentario)}</dd>` : ''}</dl>
-      <div class="ticket-grande" id="vp-ticket"><p class="ayuda">Cargando foto del ticket…</p></div>
+      <div class="ticket-grande" id="vp-ticket"><p class="ayuda">Cargando ticket…</p></div>
+      ${(p.inv_pedido_danos || []).length ? `<h3 class="sub-titulo">⚠️ Llegó mal (no se suma al inventario)</h3><div class="lista">${p.inv_pedido_danos.map((d) => `<div class="fila inv"><div class="fila-txt">
+        <b>${esc(cantidad(d.cantidad))} ${esc(d.nombre)} · ${esc(d.motivo.toLowerCase())}</b><span>Quedó como incidencia en Pendientes para reclamar o dar de baja.</span>
+        ${d.foto_path ? `<img class="evidencia" data-foto-dano="${esc(d.foto_path)}" alt="Foto de lo que llegó mal" hidden>` : ''}</div></div>`).join('')}</div>` : ''}
       <h3 class="sub-titulo">Artículos</h3>
       <div class="lista" id="vp-items">${its.map((i, n) => {
         const a = mapa.get(i.articulo_id);
@@ -127,8 +130,13 @@ async function verPedido(p, arts, mapa, alCambiar) {
           <button type="button" class="btn peligro-suave" data-cancelar>Cancelar pedido</button></div>` : '<div class="acciones"><button type="button" class="btn ghost" data-cerrar>Cerrar</button></div>'}`);
     if (p.ticket_path) api.urlsFotos([{ path: p.ticket_path }], 'tickets').then((m) => {
       const u = m.get(`${p.ticket_path}|`); const t = $('#vp-ticket', v.el);
-      if (t) t.innerHTML = u ? `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Ticket del pedido"></a><p class="ayuda">Toca la foto para verla en grande.</p>` : '<p class="ayuda">No se pudo cargar la foto del ticket.</p>';
+      if (!t) return;
+      if (!u) { t.innerHTML = '<p class="ayuda">No se pudo cargar el ticket.</p>'; return; }
+      t.innerHTML = /\.pdf$/i.test(p.ticket_path) ? `<a class="btn ghost" href="${esc(u)}" target="_blank" rel="noopener">📄 Abrir ticket (PDF)</a>`
+        : `<a href="${esc(u)}" target="_blank" rel="noopener"><img src="${esc(u)}" alt="Ticket del pedido"></a><p class="ayuda">Toca la foto para verla en grande.</p>`;
     });
+    const fd = $$('[data-foto-dano]', v.el);
+    if (fd.length) api.urlsFotos(fd.map((i) => ({ path: i.dataset.fotoDano })), 'evidencias').then((m) => fd.forEach((i) => { const u = m.get(`${i.dataset.fotoDano}|`); if (u) { i.src = u; i.hidden = false; } }));
   }
   pintar();
   v.el.addEventListener('input', (e) => { const f = e.target.closest('[data-n]'); if (f && e.target.matches('[data-cant]')) its[Number(f.dataset.n)].cantidad = e.target.value; });
@@ -290,7 +298,7 @@ async function verConteo(id, alCambiar) {
           <div class="dif-txt"><b>${esc(i.nombre)}</b><span>Esperado ${esc(cantidad(i.esperado))} · contado ${esc(cantidad(i.contado))}${i.precio == null ? ' · <span class="warn-txt">precio variable: $0</span>' : ''}</span>
             <span class="dif-extra">Loyverse ${esc(cantidad(i.stock_lv))}${Number(i.vendido_despues) ? ` · vendido después de contarlo ${esc(cantidad(i.vendido_despues))}` : ''}${i.reconteo_contado != null ? ` · <b>reconteo: ${esc(cantidad(i.reconteo_contado))}</b> (antes ${esc(signo(i.diferencia_original))})` : ''}</span></div>
           <div class="dif-num ${i.diferencia < 0 ? 'mal-txt' : 'ok-txt'}"><b>${esc(fmtDif(i))}</b><span>${esc(pesos(Math.abs(i.diferencia) * (i.precio || 0)))}</span></div>
-          <label class="no-cobrar"><input type="checkbox" data-nocobrar ${noCobrar.has(i.articulo_id) ? 'checked' : ''}> No cobrar</label>
+          <label class="no-cobrar"><input type="checkbox" data-nocobrar ${noCobrar.has(i.articulo_id) ? 'checked' : ''}> Perdonar (no cobrar)</label>
           ${aplicado ? '' : `<label class="recontar"><input type="checkbox" data-recontar ${recontar.has(i.articulo_id) ? 'checked' : ''}> Recontar</label>`}
         </div>`).join('')}</div>
         ${aplicado ? '' : `<div class="fila-botones" style="margin:8px 0 0"><select id="cv-rq"><option value="tipo:cualquiera">Quien esté en turno</option>

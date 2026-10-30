@@ -98,6 +98,7 @@ export async function montarAjustes(el) {
     ['resumen_semanal_hora', 'Correo del resumen semanal', 'hora de los lunes', 'time'],
     ['inactividad_minutos', 'Cerrar usuario por inactividad', 'minutos sin usar el celular del club', 'number'],
     ['cerro_antes_min', 'Aviso "cerró antes de su hora"', 'minutos antes de la salida; si cierra más temprano que esto, aparece en Avisos', 'number'],
+    ['caja_margen', 'Margen de descuadre de caja', 'pesos; si el descuadre es de esta cantidad o menos, queda anotado pero no avisa a gerencia ni pide razón al empleado', 'number'],
     ['fotos_tareas_dias', 'Guardar fotos de tareas', 'días (7 a 365); después se borran solas. Las de incidencias se guardan hasta que se resuelven', 'number'],
     ['fotos_tickets_dias', 'Guardar fotos de tickets de pedidos', 'días (30 a 730)', 'number'],
   ];

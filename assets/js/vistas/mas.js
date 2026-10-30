@@ -5,6 +5,7 @@ import { esc, $, $$, ROL, aviso, conOcupado, campoPassword, activarMostrar, most
 import { montarUsuarios } from './usuarios.js';
 import { montarAjustes } from './ajustes.js';
 import { montarTablero } from './tablero.js';
+import { formPrefsAvisos } from './revisiones.js';
 import { estadoPush, activarPush, desactivarPush, probarPush, esIOS } from '../push.js';
 
 const LLAVE = 'ppstaff-mas-vista';
@@ -38,6 +39,8 @@ async function montarCuenta(el, yo) {
       <dt>Rol</dt><dd>${esc(ROL[yo.rol] || yo.rol)}</dd></dl></section>
     <h3 class="sub-titulo">🔔 Notificaciones en este teléfono</h3>
     <section class="tarjeta" id="mc-push"><p class="cargando">Revisando…</p></section>
+    <h3 class="sub-titulo">📬 Avisos que recibo</h3>
+    <section class="tarjeta" id="mc-prefs"></section>
     <h3 class="sub-titulo">📱 Plan B: usar este teléfono como celular del club</h3>
     <section class="tarjeta"><p class="detalle" style="margin-top:0">Si el celular del club se descompone o se pierde, este teléfono puede funcionar como celular del club por unas horas: los empleados entran con su PIN y no ven nada de gerencia. Para salir se cierra tu sesión y vuelves a entrar con tu contraseña. Al administrador le llega un aviso.</p>
       <div class="fila-botones" style="margin:0"><select id="mc-horas" aria-label="Duración"><option value="4">4 horas</option><option value="8" selected>8 horas</option><option value="12">12 horas</option></select>
@@ -71,6 +74,7 @@ async function montarCuenta(el, yo) {
     });
   });
   pintarPush($('#mc-push', el), yo);
+  formPrefsAvisos($('#mc-prefs', el));
 }
 async function pintarPush(c, yo) {
   const e = await estadoPush();

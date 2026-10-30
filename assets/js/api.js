@@ -189,6 +189,6 @@ export async function urlsFotos(items, bucket = 'avatares') {
 }
 export async function subirFoto(ruta, blob, bucket = 'avatares') {
   const t = await tokenVigente();
-  await pedir(`/storage/v1/object/${bucket}/${ruta}`, { metodo: 'POST', cuerpo: blob, token: t, headers: { 'x-upsert': 'true', 'Content-Type': 'image/jpeg' } });
+  await pedir(`/storage/v1/object/${bucket}/${ruta}`, { metodo: 'POST', cuerpo: blob, token: t, headers: { 'x-upsert': 'true', 'Content-Type': blob.type || 'image/jpeg' } });
   for (const k of [...cacheFotos.keys()]) if (k.startsWith(bucket + '/' + ruta + '|')) cacheFotos.delete(k);
 }

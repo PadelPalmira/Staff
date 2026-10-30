@@ -1,5 +1,6 @@
 // Panel de administración y gerencia: barra superior, pestañas e Inicio.
 import * as api from '../api.js';
+import { ventanaCajas, ventanaMover } from './revisiones.js';
 import { APP_VERSION } from '../config.js';
 import { esc, $, $$, ROL, avatar, hidratarAvatares, aviso, conOcupado, primerNombre } from '../ui.js';
 import { montarTurnos, pintarEnVivo, verTurno, pintarAvisos, contarAvisos } from './turnos.js';
@@ -141,6 +142,8 @@ export function montarPanel(raiz, ctx, yo) {
     // Por hacer: todo lo que espera una acción de gerencia/admin, con un toque para ir directo
     const tHacer = $('#por-hacer .por-hacer', el);
     const IR = {
+      cajas_revisar: ['ventana', 'cajas', '💵', (n) => `${n} descuadre${n === 1 ? '' : 's'} de caja por revisar`, 'Perdónalo si fue un error honesto o confírmalo.', 'mal'],
+      mover_tareas: ['ventana', 'mover', '📅', (n) => `${n} tarea${n === 1 ? '' : 's'} que piden mover de día`, 'Apruébalas o recházalas.'],
       pedidos_verificar: ['inventario', 'pedidos', '📦', (n) => `${n} pedido${n === 1 ? '' : 's'} por verificar`, 'Compáralo con la foto del ticket; al verificarlo se suma solo en Loyverse.'],
       lv_aplicar: ['inventario', 'pedidos', '⬆️', (n) => `${n} cambio${n === 1 ? '' : 's'} por aplicar en Loyverse`, 'No se pudieron subir o falta tocar “Aplicar”.', 'mal'],
       lv_sin_explicar: ['inventario', 'pedidos', '🕵️', (n) => `${n} cambio${n === 1 ? '' : 's'} raro${n === 1 ? '' : 's'} en Loyverse`, 'Existencias que cambiaron directo en Loyverse.', 'mal'],
@@ -168,6 +171,7 @@ export function montarPanel(raiz, ctx, yo) {
     tHacer.addEventListener('click', (e) => {
       const b = e.target.closest('[data-hacer]'); if (!b) return;
       const [tab, sub] = IR[b.dataset.hacer];
+      if (tab === 'ventana') return sub === 'cajas' ? ventanaCajas(pintarHacer) : ventanaMover(pintarHacer);
       if (tab === 'inventario') api.guardarLocal('ppstaff-inv-seg', sub);
       if (tab === 'pendientes') api.guardarLocal('ppstaff-pend-vista', sub);
       if (tab === 'turnos') api.guardarLocal('ppstaff-turnos-vista', sub);
