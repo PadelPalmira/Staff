@@ -5,7 +5,7 @@ import { esc, $, $$, aviso, ventana, conOcupado, horaCorta, fechaHora, duracionT
 const TZ = 'America/Mexico_City';
 const COLS_TURNO = 'id,fecha,tipo,perfil_nombre,estado,inicio_prog,fin_prog,abierto_en,cerrado_en,tarde_min,abierto_con_aviso,cierre_auto,resumen,abrio_nombre,entregado_a_nombre,entregado_en,motivo_entrega';
 const cubreTxt = (t) => (t.abrio_nombre && t.abrio_nombre !== t.perfil_nombre ? ` (cubre a ${t.abrio_nombre.split(' ')[0]})` : t.entregado_a_nombre ? ` (lo entregó a ${t.entregado_a_nombre.split(' ')[0]})` : '');
-const COLS_TAREA = 'id,turno_id,nombre,momento,orden,limite,requiere_foto,estado,marcada_en,a_tiempo,foto_path,razon,excusa_motivo,etiqueta_no_aplica';
+const COLS_TAREA = 'id,turno_id,nombre,momento,orden,limite,requiere_foto,estado,marcada_en,a_tiempo,foto_path,razon,excusa_motivo,etiqueta_no_aplica,auto_loyverse';
 const ERR = { sin_permiso: 'No tienes permiso para esto.', no_pendiente: 'Esa tarea ya no está pendiente.', no_excusada: 'Esa tarea no estaba excusada.', no_existe: 'Ya no existe.' };
 
 export const hoyMx = () => new Date().toLocaleDateString('en-CA', { timeZone: TZ });
@@ -20,7 +20,7 @@ export async function pintarEnVivo(el) {
     const hoy = hoyMx();
     const turnos = await api.seleccionar('turnos', `select=${COLS_TURNO}&or=(estado.eq.abierto,fecha.eq.${hoy})&order=abierto_en.desc&limit=10`);
     const ids = turnos.filter((t) => t.estado === 'abierto').map((t) => t.id);
-    const tareas = ids.length ? await api.seleccionar('turno_tareas', `select=turno_id,estado,limite&turno_id=in.(${ids.join(',')})`) : [];
+    const tareas = ids.length ? await api.seleccionar('turno_tareas', `select=turno_id,estado,limite,auto_loyverse&turno_id=in.(${ids.join(',')})`) : [];
     if (!turnos.length) { el.innerHTML = '<p class="detalle">Hoy todavía nadie ha abierto turno.</p>'; return; }
     const ahora = Date.now();
     el.innerHTML = turnos.map((t) => {
@@ -32,7 +32,7 @@ export async function pintarEnVivo(el) {
       }
       const l = tareas.filter((x) => x.turno_id === t.id);
       const ok = l.filter((x) => x.estado !== 'pendiente').length;
-      const venc = l.filter((x) => x.estado === 'pendiente' && x.limite && new Date(x.limite) < ahora).length;
+      const venc = l.filter((x) => x.estado === 'pendiente' && !x.auto_loyverse && x.limite && new Date(x.limite) < ahora).length;
       const nsp = l.filter((x) => x.estado === 'no_se_pudo').length;
       const pct = l.length ? Math.round((ok / l.length) * 100) : 100;
       return `<button type="button" class="fila vivo" data-turno="${esc(t.id)}"><div class="fila-txt"><b>${esc(t.perfil_nombre)} · ${esc(nombreTipo(t.tipo))}${esc(cubreTxt(t))}</b>
@@ -89,12 +89,13 @@ export async function verTurno(id, yo, alCambiar) {
       const l = tareas.filter((x) => x.momento === mom);
       if (!l.length) continue;
       h += `<h3 class="sub-titulo">${titulo}</h3><div class="lista-tareas">${l.map((x) => {
-        const venc = x.estado === 'pendiente' && x.limite && new Date(x.limite) < ahora;
+        const venc = x.estado === 'pendiente' && !x.auto_loyverse && x.limite && new Date(x.limite) < ahora;
         let est;
         if (x.estado === 'hecha') est = `<span class="${x.a_tiempo ? 'ok-txt' : 'warn-txt'}">✓ ${esc(horaCorta(x.marcada_en))} · ${x.a_tiempo ? 'a tiempo' : 'fuera de tiempo'}</span>`;
         else if (x.estado === 'no_aplica') est = `<span class="ok-txt">${esc(x.etiqueta_no_aplica || 'No aplica')}</span>`;
         else if (x.estado === 'no_se_pudo') est = `<span class="warn-txt">⚠ No se pudo · ${esc(horaCorta(x.marcada_en))}</span>`;
         else if (x.estado === 'excusada') est = `<span class="ok-txt">Excusada${x.excusa_motivo ? `: ${esc(x.excusa_motivo)}` : ''}</span>`;
+        else if (x.auto_loyverse && t.estado === 'abierto') est = `<span class="sub">🔒 Se confirma con Loyverse al cerrar la caja</span>`;
         else est = `<span class="${venc || t.estado === 'cerrado' ? 'mal-txt' : ''}">${t.estado === 'cerrado' ? 'Sin hacer' : venc ? `Venció a las ${esc(horaCorta(x.limite))}` : x.limite ? `Antes de las ${esc(horaCorta(x.limite))}` : 'Pendiente'}</span>`;
         const puedeExcusar = x.estado === 'pendiente' || x.estado === 'no_se_pudo';
         const nsp = x.estado === 'no_se_pudo';

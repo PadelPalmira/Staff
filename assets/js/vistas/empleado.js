@@ -195,7 +195,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
   limpiezas.push(() => document.removeEventListener('visibilitychange', alVolver));
 
   const hechas = (t) => t.filter((x) => x.estado !== 'pendiente').length;
-  const vencida = (x) => x.estado === 'pendiente' && x.limite && new Date(x.limite) < new Date();
+  const vencida = (x) => x.estado === 'pendiente' && !x.auto && x.limite && new Date(x.limite) < new Date();
 
   function pintar(forzar = false) {
     if (tab !== 'inventario' && inv) { inv.destruir(); inv = null; }
@@ -461,12 +461,14 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     const meta = hecha ? `<span class="${x.a_tiempo ? 'ok-txt' : 'warn-txt'}">${esc(x.razon || '✓ Loyverse')}${x.a_tiempo ? '' : ' · fuera de tiempo'}</span>`
       : x.estado === 'excusada' ? '<span class="ok-txt">Excusada por gerencia</span>'
       : nsp ? `<span class="warn-txt">⚠ No se pudo · se avisó a gerencia</span>${x.razon ? `<span class="tarea-meta">Razón: ${esc(x.razon)}</span>` : ''}`
-      : `<span class="auto-txt">🔒 Se marca sola cuando ${AUTO_TXT[x.auto] || 'Loyverse lo registre'} en Loyverse</span>${x.limite ? ` · ${vencida(x) ? `<span class="mal-txt">Venció a las ${esc(horaCorta(x.limite))}</span>` : `Antes de las ${esc(horaCorta(x.limite))}`}` : ''}`;
-    return `<div class="tarea auto ${listo ? 'lista' : ''} ${nsp ? 'nosepudo' : ''} ${!listo && vencida(x) ? 'vencida' : ''}" data-id="${esc(x.id)}">
+      : x.auto === 'caja_abierta' ? `<span class="auto-txt">🔒 Abre la caja en Loyverse${x.limite ? ` antes de las ${esc(horaCorta(x.limite))}` : ''}. Se confirma sola cuando cierres la caja (Loyverse guarda la hora en que la abriste).</span>`
+      : `<span class="auto-txt">🔒 Se marca sola cuando ${AUTO_TXT[x.auto] || 'Loyverse lo registre'} en Loyverse</span>`;
+    return `<div class="tarea auto ${listo ? 'lista' : ''} ${nsp ? 'nosepudo' : ''}" data-id="${esc(x.id)}">
       <span class="tarea-check candado" aria-hidden="true">${hecha ? '✓' : nsp ? '!' : '🔒'}</span>
       <div class="tarea-txt"><b>${esc(x.nombre)}</b><span class="tarea-meta">${meta}</span>
-        ${x.estado === 'pendiente' || nsp ? `<span class="tarea-botones"><button type="button" class="chip" data-a="sync">${x.auto === 'caja_cerrada' ? '🔄 Ya cerré la caja' : '🔄 Ya lo hice en Loyverse'}</button>
-          ${nsp ? '' : '<button type="button" class="chip" data-a="nopuedo">No se puede</button>'}</span>` : ''}</div></div>`;
+        ${(x.estado === 'pendiente' || nsp) && x.auto === 'caja_cerrada' ? `<span class="tarea-botones"><button type="button" class="chip" data-a="sync">🔄 Ya cerré la caja</button>
+          ${nsp ? '' : '<button type="button" class="chip" data-a="nopuedo">No se puede</button>'}</span>` : ''}
+        ${x.estado === 'pendiente' && x.auto === 'caja_abierta' ? '<span class="tarea-botones"><button type="button" class="chip" data-a="nopuedo">No se puede</button></span>' : ''}</div></div>`;
   }
   // Pide a Loyverse los datos nuevos y vuelve a revisar unas veces
   let revisando = null;
