@@ -1,7 +1,7 @@
 // Pestaña "Más": Mi cuenta (contraseña y notificaciones) para todos; Usuarios, Ajustes y Actividad de gerencia para el admin.
 import * as api from '../api.js';
 import { APP_VERSION } from '../config.js';
-import { esc, $, $$, ROL, aviso, conOcupado, campoPassword, activarMostrar, mostrarError, quitarError, duracionTexto } from '../ui.js';
+import { esc, $, $$, ROL, aviso, conOcupado, campoPassword, activarMostrar, mostrarError, quitarError, duracionTexto , puede } from '../ui.js';
 import { montarUsuarios } from './usuarios.js';
 import { montarAjustes } from './ajustes.js';
 import { montarTablero } from './tablero.js';
@@ -12,7 +12,8 @@ const LLAVE = 'ppstaff-mas-vista';
 
 export function montarMas(el, ctx, yo, { vista: inicial } = {}) {
   const esAdmin = yo.rol === 'admin';
-  const vistas = esAdmin ? [['tablero', '📊<br>Tablero'], ['usuarios', '☺<br>Usuarios'], ['ajustes', '⚙<br>Ajustes'], ['actividad', '📈<br>Actividad'], ['cuenta', '👤<br>Mi cuenta']] : [['cuenta', '👤 Mi cuenta']];
+  const vistas = esAdmin ? [['tablero', '📊<br>Tablero'], ['usuarios', '☺<br>Usuarios'], ['ajustes', '⚙<br>Ajustes'], ['actividad', '📈<br>Actividad'], ['cuenta', '👤<br>Mi cuenta']]
+    : puede(yo, 'tablero') ? [['cuenta', '👤<br>Mi cuenta'], ['tablero', '📊<br>Tablero']] : [['cuenta', '👤 Mi cuenta']];
   let vista = inicial || api.leerLocal(LLAVE) || vistas[0][0];
   if (!vistas.some((v) => v[0] === vista)) vista = vistas[0][0];
   el.innerHTML = `${vistas.length > 1 ? `<div class="segmentos cuatro" role="tablist" style="--n:${vistas.length}">${vistas.map(([k, n]) => `<button type="button" data-vista="${k}">${n}${k === 'usuarios' ? '<i class="punto-aviso" data-badge-sol hidden></i>' : ''}</button>`).join('')}</div>` : ''}

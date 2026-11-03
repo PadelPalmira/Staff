@@ -11,7 +11,7 @@ const ERR = {
   turno_ya_existe: 'Este turno ya se abrió hoy.', tipo_no_corresponde: 'Ese turno no corresponde a hoy.',
   no_es_tu_turno: 'Esta tarea es de otro turno.', turno_cerrado: 'El turno ya está cerrado.', excusada: 'La gerencia ya excusó esta tarea.',
   falta_foto: 'Esta tarea necesita foto.', falta_razon: 'Escribe la razón (mínimo 3 letras).', no_condicional: 'Esta tarea no tiene la opción "No aplica".',
-  falta_reporte: 'Escribe cómo sigue la incidencia (mínimo 3 letras).',
+  falta_reporte: 'Escribe cómo sigue la incidencia (mínimo 3 letras).', faltan_fotos: 'Faltan fotos: toma una de cada cosa que pide la tarea.',
   falta_motivo: 'Escribe el motivo (mínimo 3 letras).', ya_no_disponible: 'Esa solicitud ya no está disponible (ya la tomó alguien o se canceló).',
   no_es_para_ti: 'Esa solicitud es para otro compañero.', sin_turno: 'No tienes un turno abierto.', mismo: 'Ese turno ya es tuyo.', perfil_invalido: 'Ese compañero ya no está activo.',
   sin_conexion: 'No hay internet. Revisa la conexión e intenta de nuevo.',
@@ -436,7 +436,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     const partes = [];
     if (x.incidencia_id) partes.push('Escribe cómo sigue');
     if (x.limite) partes.push(vencida(x) ? `<span class="mal-txt">Venció a las ${esc(horaCorta(x.limite))}</span>` : `Antes de las ${esc(horaCorta(x.limite))}`);
-    if (x.requiere_foto) partes.push('📷 pide foto');
+    if (x.requiere_foto) partes.push(x.fotos_req?.length > 1 ? `📷 pide ${x.fotos_req.length} fotos` : x.fotos_req?.length === 1 ? `📷 foto: ${esc(x.fotos_req[0])}` : '📷 pide foto');
     if (x.mover?.estado === 'pendiente') partes.push(`<span class="warn-txt">📅 Pediste moverla al ${esc(fechaTxt(x.mover.fecha))} · esperando a gerencia</span>`);
     if (x.mover?.estado === 'rechazada') partes.push(`<span class="mal-txt">📅 Gerencia no aprobó moverla${x.mover.nota ? `: ${esc(x.mover.nota)}` : ''}</span>`);
     return partes.join(' · ') + cola;
@@ -560,6 +560,53 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
         aviso(err.codigo === 'sin_conexion' ? 'No hay internet: las tareas con foto necesitan conexión. Intenta cuando vuelva la señal.' : `No se pudo subir la foto (${err.message || 'error'}). Intenta de nuevo.`, 'error', 7000);
       }
     }));
+  }
+  // Tarea con varias fotos: una por cada cosa que pide gerencia (solo cámara, nada de fotos viejas)
+  function ventanaFotos(x) {
+    const fotos = x.fotos_req.map(() => null);
+    const urls = [];
+    const v = ventana(`<p class="detalle" style="margin-top:0">Toma <b>una foto de cada cosa</b>. La tarea se marca cuando estén todas.</p>
+      <div class="lista fotos-tarea">${x.fotos_req.map((et, i) => `<div class="fila inv foto-item" data-i="${i}"><div class="fila-txt"><b>${i + 1}. ${esc(et)}</b><span class="sub" data-estado>Falta</span></div>
+        <img class="foto-mini" alt="" hidden><button type="button" class="btn chico" data-tomar>📷 Tomar</button></div>`).join('')}</div>
+      <div class="acciones" style="margin-top:12px"><button type="button" class="btn grande" data-listo disabled>Guardar y marcar (0/${x.fotos_req.length})</button></div>`,
+    { titulo: x.nombre, alCerrar: () => urls.forEach((u) => u && URL.revokeObjectURL(u)) });
+    const actualizar = () => {
+      const n = fotos.filter(Boolean).length;
+      const b = $('[data-listo]', v.el); b.disabled = n < fotos.length; b.textContent = `Guardar y marcar (${n}/${fotos.length})`;
+    };
+    v.el.addEventListener('click', (e) => {
+      const t = e.target.closest('[data-tomar]');
+      if (t) {
+        const fila = t.closest('[data-i]'), i = Number(fila.dataset.i);
+        const inp = document.createElement('input');
+        inp.type = 'file'; inp.accept = 'image/*'; inp.setAttribute('capture', 'environment');
+        inp.addEventListener('change', async () => {
+          const f = inp.files?.[0]; if (!f) return;
+          try { fotos[i] = await comprimirEvidencia(f); } catch { return aviso('No se pudo leer la foto. Intenta de nuevo.', 'error'); }
+          if (urls[i]) URL.revokeObjectURL(urls[i]);
+          urls[i] = URL.createObjectURL(fotos[i]);
+          const im = $('img', fila); im.src = urls[i]; im.hidden = false;
+          $('[data-estado]', fila).innerHTML = '<span class="ok-txt">✓ Lista</span>'; t.textContent = '📷 Otra';
+          actualizar();
+        });
+        inp.click();
+        return;
+      }
+      const l = e.target.closest('[data-listo]');
+      if (l) conOcupado(l, async () => {
+        try {
+          const rutas = [];
+          for (const [i, blob] of fotos.entries()) {
+            const ruta = `turnos/${est.mio.id}/${x.id}-${i + 1}.jpg`;
+            await api.subirFoto(ruta, blob, 'evidencias');
+            rutas.push(ruta);
+          }
+          if (await marcar(x.id, 'hecha', { p_foto: JSON.stringify(rutas) })) { v.cerrar(); aviso('Fotos guardadas y tarea marcada.', 'ok'); }
+        } catch (err) {
+          aviso(err.codigo === 'sin_conexion' ? 'No hay internet: las fotos necesitan conexión. Intenta cuando vuelva la señal.' : `No se pudo subir una foto (${err.message || 'error'}). Intenta de nuevo.`, 'error', 7000);
+        }
+      });
+    });
   }
   function ventanaNoPuedo(x) {
     const v = ventana(`<form class="formulario" novalidate><p class="detalle">Escribe por qué no se pudo hacer <b>${esc(x.nombre)}</b>. La tarea queda marcada como “No se pudo” y se avisa a gerencia y administración.</p>
@@ -812,6 +859,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     if (a === 'sync') return conOcupado(b, () => revisarLoyverse());
     if (a === 'marcar' || a === 'reportar') {
       if (x.incidencia_id) return ventanaIncidencia(x);
+      if (x.fotos_req?.length) return ventanaFotos(x);
       return x.requiere_foto ? pedirFoto(x, fila) : conOcupado(b, () => marcar(x.id, 'hecha'));
     }
     if (a === 'arreglado') return ventanaIncidencia(x, true);

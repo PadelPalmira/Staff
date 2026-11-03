@@ -1,11 +1,11 @@
 // Turnos para admin y gerencia: "En vivo" (tarjeta del Inicio) e historial con detalle, fotos y excusas.
 import * as api from '../api.js';
-import { esc, $, $$, aviso, ventana, conOcupado, horaCorta, fechaHora, duracionTexto } from '../ui.js';
+import { esc, $, $$, aviso, ventana, conOcupado, horaCorta, fechaHora, duracionTexto , rutasAdjuntos } from '../ui.js';
 
 const TZ = 'America/Mexico_City';
 const COLS_TURNO = 'id,fecha,tipo,perfil_nombre,estado,inicio_prog,fin_prog,abierto_en,cerrado_en,tarde_min,abierto_con_aviso,cierre_auto,resumen,abrio_nombre,entregado_a_nombre,entregado_en,motivo_entrega';
 const cubreTxt = (t) => (t.abrio_nombre && t.abrio_nombre !== t.perfil_nombre ? ` (cubre a ${t.abrio_nombre.split(' ')[0]})` : t.entregado_a_nombre ? ` (lo entregó a ${t.entregado_a_nombre.split(' ')[0]})` : '');
-const COLS_TAREA = 'id,turno_id,nombre,momento,orden,limite,requiere_foto,estado,marcada_en,a_tiempo,foto_path,razon,excusa_motivo,etiqueta_no_aplica,auto_loyverse';
+const COLS_TAREA = 'id,turno_id,nombre,momento,orden,limite,requiere_foto,estado,marcada_en,a_tiempo,foto_path,fotos_req,razon,excusa_motivo,etiqueta_no_aplica,auto_loyverse';
 const ERR = { sin_permiso: 'No tienes permiso para esto.', no_pendiente: 'Esa tarea ya no está pendiente.', no_excusada: 'Esa tarea no estaba excusada.', no_existe: 'Ya no existe.' };
 
 export const hoyMx = () => new Date().toLocaleDateString('en-CA', { timeZone: TZ });
@@ -103,7 +103,7 @@ export async function verTurno(id, yo, alCambiar) {
           <div class="tarea-check ro">${x.estado === 'pendiente' ? '' : nsp ? '!' : '✓'}</div>
           <div class="tarea-txt"><b>${esc(x.nombre)}</b><span class="tarea-meta">${est}</span>
             ${x.razon ? `<span class="tarea-meta">Razón: ${esc(x.razon)}</span>` : ''}
-            ${x.foto_path ? `<img class="evidencia" data-foto="${esc(x.foto_path)}" alt="Evidencia de ${esc(x.nombre)}" hidden>` : ''}
+            ${rutasAdjuntos(x.foto_path).length ? `<div class="fotos-ev">${rutasAdjuntos(x.foto_path).map((r, i) => `<figure><img class="evidencia" data-foto="${esc(r)}" alt="Evidencia de ${esc(x.nombre)}" hidden>${x.fotos_req?.[i] && rutasAdjuntos(x.foto_path).length > 1 ? `<figcaption>${esc(x.fotos_req[i])}</figcaption>` : ''}</figure>`).join('')}</div>` : ''}
             <span class="tarea-botones">${puedeExcusar ? '<button type="button" class="chip" data-excusar>Excusar</button>' : ''}${x.estado === 'excusada' ? '<button type="button" class="chip" data-quitar-excusa>Quitar excusa</button>' : ''}</span>
           </div></div>`;
       }).join('')}</div>`;
@@ -111,7 +111,7 @@ export async function verTurno(id, yo, alCambiar) {
     h += '<div class="acciones" style="margin-top:14px"><button type="button" class="btn ghost" data-cerrar>Cerrar</button></div>';
     v.poner(h);
     pintarVentas($('#vt-ventas', v.el), id);
-    const urls = await api.urlsFotos(tareas.filter((x) => x.foto_path).map((x) => ({ path: x.foto_path })), 'evidencias');
+    const urls = await api.urlsFotos(tareas.flatMap((x) => rutasAdjuntos(x.foto_path)).map((r) => ({ path: r })), 'evidencias');
     $$('img[data-foto]', v.el).forEach((im) => { const u = urls.get(`${im.dataset.foto}|`); if (u) { im.src = u; im.hidden = false; } });
   }
   v.el.addEventListener('click', async (e) => {

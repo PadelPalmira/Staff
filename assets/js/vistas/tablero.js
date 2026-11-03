@@ -1,7 +1,8 @@
-// Tablero del dueño (solo administrador): ventas de Loyverse, cumplimiento, descuadres, merma y costos, por día, semana o mes.
+// Tablero del dueño (administrador y gerentes con acceso): ventas de Loyverse, cumplimiento, descuadres, merma y costos, por día, semana o mes.
 import * as api from '../api.js';
 import { esc, $, $$, pesos, horaCorta } from '../ui.js';
 import { ventanaCaja, insigniaRevision } from './revisiones.js';
+import { ventana } from '../ui.js';
 
 const TZ = 'America/Mexico_City';
 const LLAVE = 'ppstaff-tablero-modo';
@@ -46,6 +47,8 @@ export function montarTablero(el) {
     const p = e.target.closest('[data-paso]');
     if (p && !p.disabled) { paso += Number(p.dataset.paso); return cargar(); }
     if (e.target.closest('[data-reintentar]')) return cargar();
+    const rm = e.target.closest('[data-resumen-mes]');
+    if (rm) return ventanaResumenMes(rm.dataset.resumenMes);
     const cj = e.target.closest('[data-caja]');
     if (cj && ultimo) { const c = (ultimo.cajas || []).find((x) => x.id === cj.dataset.caja); if (c) ventanaCaja(c, cargar); }
   });
@@ -98,7 +101,8 @@ function pintar(d, r) {
   const aj = Object.fromEntries((d.ajustes || []).map((x) => [x.grupo, x]));
   const pend = d.pendientes || {};
 
-  let h = `<section class="tarjeta">
+  let h = r.unidad === 'mes' ? `<button type="button" class="tarjeta boton-tablero boton-resumen" data-resumen-mes="${esc(r.desde)}"><span aria-hidden="true">📈</span><div><b>Resumen del mes</b><span class="sub">Lo mejor, qué mejorar, qué promover y lo que más se movió</span></div><i aria-hidden="true">›</i></button>` : '';
+  h += `<section class="tarjeta">
     <div class="kpi-grande"><span>Ventas netas (Loyverse)</span><b>${pesos(netas)}</b>
       ${cambio == null ? '' : `<i class="${cambio >= 0 ? 'ok-txt' : 'mal-txt'}">${cambio >= 0 ? '▲' : '▼'} ${Math.abs(cambio)}% vs. ${r.unidad === 'dia' ? 'el día anterior' : d.dias_comparados && d.dias_comparados < d.dias_periodo ? `${d.dias_comparados === 1 ? 'el mismo día' : `los mismos ${d.dias_comparados} días`} ${unidadTxt[1]} anterior` : `${unidadTxt[0]} anterior`} (${pesos(previas)})</i>`}</div>
     <div class="cifras tres"><div><b>${tickets}</b><span>tickets</span></div><div><b>${pesos(tickets ? netas / tickets : 0)}</b><span>ticket promedio</span></div>
@@ -213,4 +217,66 @@ function seccionDia(d) {
   const inc = d.incidencias || [];
   if (inc.length) h += `<h3 class="sub-titulo">📌 Reportado este día</h3><section class="tarjeta"><ul class="lista-tab">${inc.map((x) => `<li><span>${x.tipo === 'incidencia' ? '🛠️' : '📌'} ${esc(x.titulo)}</span><b><small>${esc(x.creado_por || '')} · ${esc(horaCorta(x.creado_en))}</small></b></li>`).join('')}</ul></section>`;
   return h;
+}
+
+// ================= RESUMEN DEL MES =================
+const DOW = ['', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
+const nombreMes = (m) => { const d = aFecha(m); return `${MESES[d.getUTCMonth()]} ${d.getUTCFullYear()}`; };
+const lista = (arr, fn, vacio = 'Nada que mostrar.') => (arr && arr.length ? `<ul class="rm-lista">${arr.map(fn).join('')}</ul>` : `<p class="detalle">${vacio}</p>`);
+
+export async function ventanaResumenMes(mes) {
+  const v = ventana('<p class="cargando">Cargando…</p>', { titulo: '📈 Resumen del mes' });
+  async function cargar(m) {
+    v.poner('<p class="cargando">Cargando…</p>');
+    let r;
+    try { r = await api.rpc('resumen_mes', { p_mes: m }); } catch (e) { r = { ok: false, mensaje: e.message }; }
+    if (!r?.ok) { v.poner(`<p class="detalle">${esc(r?.error === 'sin_permiso' ? 'No tienes acceso al resumen del mes. Pídeselo al administrador.' : r?.mensaje || 'No se pudo cargar.')}</p>`); return; }
+    v.poner(pintarResumen(r.resumen, r.meses || [], m));
+    const sel = $('#rm-mes', v.el);
+    if (sel) sel.addEventListener('change', () => cargar(sel.value));
+  }
+  cargar(mes);
+}
+
+function pintarResumen(d, meses, m) {
+  const ve = d.ventas || {}, eq = d.equipo || {}, di = d.dinero || {}, pe = d.pendientes || {};
+  const opciones = [...new Set([m, ...meses])].sort().reverse();
+  const maxDow = Math.max(1, ...(ve.por_dia_semana || []).map((x) => Number(x.promedio)));
+  const maxHora = Math.max(1, ...(ve.por_hora || []).map((x) => Number(x.ventas)));
+  const cambio = ve.cambio_pct;
+  return `<div class="resumen-mes">
+    <div class="campo"><label for="rm-mes">Mes</label><select id="rm-mes">${opciones.map((x) => `<option value="${esc(x)}" ${x === m ? 'selected' : ''}>${esc(nombreMes(x))}</option>`).join('')}</select></div>
+    ${d.completo === false ? '<p class="nota-info">⏳ El mes aún no termina: los números se van actualizando.</p>' : ''}
+    <section class="tarjeta"><div class="kpi-grande"><span>Ventas netas</span><b>${pesos(ve.netas || 0)}</b>
+      ${cambio == null ? '' : `<i class="${cambio >= 0 ? 'ok-txt' : 'mal-txt'}">${cambio >= 0 ? '▲' : '▼'} ${Math.abs(cambio)}% vs. el mes anterior (${pesos(ve.mes_anterior || 0)})</i>`}</div>
+      <div class="cifras tres"><div><b>${ve.tickets || 0}</b><span>tickets</span></div><div><b>${pesos(ve.promedio || 0)}</b><span>ticket promedio</span></div>
+      <div><b>${ve.mejor_dia ? esc(diaCorto(ve.mejor_dia.fecha)) : '—'}</b><span>mejor día${ve.mejor_dia ? ` (${pesos(ve.mejor_dia.ventas)})` : ''}</span></div></div></section>
+    <section class="tarjeta rm-bien"><h3>🌟 Lo mejor del mes</h3>${lista(d.mejor, (x) => `<li>${esc(x)}</li>`, 'Sin datos suficientes todavía.')}</section>
+    <section class="tarjeta rm-mejorar"><h3>🛠️ Qué se puede mejorar</h3>${lista(d.mejorar, (x) => `<li>${esc(x)}</li>`, 'Nada importante. 👏')}</section>
+    <section class="tarjeta"><h3>📣 Bueno para promover</h3><p class="ayuda">Buen margen, hay stock y se vende poco.</p>
+      ${lista(d.promover, (x) => `<li><b>${esc(x.nombre)}</b><span>${pesos(x.precio)} · margen ${esc(x.margen)}% · ${esc(x.stock)} en stock · vendidos ${esc(x.vendidos)}</span></li>`)}</section>
+    <section class="tarjeta"><h3>🏆 Lo que más dejó dinero</h3>
+      ${lista(d.top_ingreso, (x, i) => `<li><b>${i + 1}. ${esc(x.nombre)}</b><span>${pesos(x.total)} · ${esc(x.cantidad)} vendidos</span></li>`)}</section>
+    <section class="tarjeta"><h3>📦 Lo que más se movió (piezas)</h3>
+      ${lista(d.top_cantidad, (x, i) => `<li><b>${i + 1}. ${esc(x.nombre)}</b><span>${esc(x.cantidad)} vendidos · ${pesos(x.total)}</span></li>`)}</section>
+    ${d.cambios_producto && d.cambios_producto.length ? `<section class="tarjeta"><h3>↕️ Cambios contra el mes anterior</h3>
+      ${lista(d.cambios_producto, (x) => `<li><b>${esc(x.nombre)}</b><span class="${Number(x.dif) >= 0 ? 'ok-txt' : 'mal-txt'}">${Number(x.dif) >= 0 ? '▲' : '▼'} ${pesos(Math.abs(x.dif))} (${pesos(x.anterior)} → ${pesos(x.actual || 0)})</span></li>`)}</section>` : ''}
+    <section class="tarjeta"><h3>💤 Sin movimiento (dinero detenido)</h3>
+      ${lista(d.sin_movimiento, (x) => `<li><b>${esc(x.nombre)}</b><span>${esc(x.stock)} en stock · ${pesos(x.valor)} a costo</span></li>`, 'Todo se movió. 🎉')}</section>
+    <section class="tarjeta"><h3>📅 Ventas por día de la semana (promedio)</h3><div class="rm-barras">
+      ${(ve.por_dia_semana || []).map((x) => `<div class="rm-barra"><span>${DOW[x.dow].slice(0, 3)}</span><i style="width:${Math.round(Number(x.promedio) / maxDow * 100)}%"></i><b>${pesos(x.promedio)}</b></div>`).join('')}</div></section>
+    ${(ve.por_hora || []).length ? `<section class="tarjeta"><h3>🕒 Ventas por hora (todo el mes)</h3><div class="rm-barras">
+      ${ve.por_hora.map((x) => `<div class="rm-barra"><span>${String(x.hora).padStart(2, '0')}h</span><i style="width:${Math.round(Number(x.ventas) / maxHora * 100)}%"></i><b>${pesos(x.ventas)}</b></div>`).join('')}</div></section>` : ''}
+    <section class="tarjeta"><h3>👥 Equipo</h3>
+      <div class="cifras tres"><div><b>${eq.turnos || 0}</b><span>turnos</span></div><div><b>${eq.cumplimiento == null ? '—' : `${eq.cumplimiento}%`}</b><span>tareas a tiempo</span></div><div><b>${eq.tarde || 0}</b><span>llegadas tarde</span></div></div>
+      ${(eq.empleados || []).length ? lista(eq.empleados, (x) => `<li><b>${esc(x.nombre)}</b><span>${esc(x.turnos)} turnos${x.pct != null ? ` · ${esc(x.pct)}% de tareas a tiempo` : ''}${x.tarde ? ` · ${esc(x.tarde)} tarde` : ''}</span></li>`) : ''}
+      ${(eq.tareas_problema || []).length ? `<p class="ayuda" style="margin-top:8px">Tareas que más se quedan sin hacer:</p>${lista(eq.tareas_problema, (x) => `<li><b>${esc(x.nombre)}</b><span>${esc(x.problemas)} de ${esc(x.total)} veces</span></li>`)}` : ''}
+      ${eq.cierres_auto ? `<p class="nota-aviso">${eq.cierres_auto} turno${eq.cierres_auto === 1 ? '' : 's'} se cerraron solos (nadie los cerró).</p>` : ''}</section>
+    <section class="tarjeta"><h3>💵 Dinero y control</h3><ul class="rm-lista">
+      <li><b>Cajas</b><span>${di.cajas_cuadradas || 0} de ${di.cajas || 0} cuadraron${Number(di.caja_faltante) ? ` · faltante ${pesos(Math.abs(di.caja_faltante))}` : ''}${Number(di.caja_perdonado) ? ` · perdonado ${pesos(di.caja_perdonado)}` : ''}</span></li>
+      <li><b>Conteos</b><span>faltante ${pesos(di.conteo_faltante || 0)}</span></li>
+      <li><b>Merma / dañado</b><span>${pesos(Number(di.merma || 0) + Number(di.danado || 0))}</span></li>
+      <li><b>Cortesías y consumo</b><span>${pesos(Number(di.cortesias || 0) + Number(di.consumo || 0))}</span></li>
+      <li><b>Pendientes</b><span>${pe.creados || 0} nuevos · ${pe.resueltos || 0} resueltos · ${pe.abiertos || 0} abiertos${Number(pe.gasto) ? ` · gasto ${pesos(pe.gasto)}` : ''}</span></li></ul></section>
+  </div>`;
 }

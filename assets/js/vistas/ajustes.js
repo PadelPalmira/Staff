@@ -2,6 +2,7 @@
 import * as api from '../api.js';
 import { esc, $, $$, aviso, ventana, confirmar, conOcupado } from '../ui.js';
 import { hoyMx } from './turnos.js';
+import { seccionAccesos } from './revisiones.js';
 
 const DIAS = [[1, 'L', 'lun'], [2, 'M', 'mar'], [3, 'M', 'mié'], [4, 'J', 'jue'], [5, 'V', 'vie'], [6, 'S', 'sáb'], [7, 'D', 'dom']];
 const hh = (t) => String(t || '').slice(0, 5);
@@ -10,6 +11,8 @@ const fechaLarga = (f) => new Date(`${f}T12:00:00`).toLocaleDateString('es-MX', 
 
 export async function montarAjustes(el) {
   el.innerHTML = `<div class="enc-seccion"><h2>Ajustes</h2></div>
+    <h3 class="sub-titulo">🔐 Accesos de gerencia</h3>
+    <section class="tarjeta" id="aj-accesos"></section>
     <h3 class="sub-titulo">🚀 Fecha de arranque</h3>
     <form class="tarjeta formulario" id="aj-arranque" novalidate><p class="detalle" style="margin-top:0">Lo que pase antes de esta fecha se toma como prueba: no cuenta para el ranking, rachas ni resúmenes, y no se mandan avisos de turnos ni tareas. Déjala vacía para que todo cuente.</p>
       <div class="campo"><label for="ar-fecha">Empezar a contar desde</label><input id="ar-fecha" type="date"></div>
@@ -37,6 +40,7 @@ export async function montarAjustes(el) {
     <h3 class="sub-titulo">Fotos</h3>
     <section class="tarjeta"><p class="detalle" style="margin-top:0">Las fotos viejas se borran solas cada madrugada según los días de arriba (así no se llena el espacio gratis de Supabase: 1 GB).</p>
       <button type="button" class="btn ghost" data-limpiar>Borrar fotos viejas ahora</button></section>`;
+  seccionAccesos($('#aj-accesos', el));
   const cTurnos = $('#aj-turnos', el), cDias = $('#aj-dias', el);
   let tipos = [];
 

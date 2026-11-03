@@ -1,6 +1,6 @@
 // Piezas compartidas de Pendientes / incidencias / solicitudes (empleado y gestión).
 import * as api from './api.js';
-import { esc, $$, fechaHora, comprimirEvidencia, ventana, aviso } from './ui.js';
+import { esc, $$, fechaHora, comprimirEvidencia, ventana, aviso, rutasAdjuntos, esPdf } from './ui.js';
 
 export const TIPOS = {
   pendiente: { ico: '📌', nombre: 'Pendiente', ayuda: 'Algo por hacer: para ti o para un compañero.' },
@@ -42,15 +42,23 @@ export function historialHtml(notas) {
   if (!notas?.length) return '';
   return `<h3 class="sub-titulo">Historial</h3><div class="historial">${notas.map((n) => `<div class="hist-item hist-${esc(n.tipo)}">
     <span class="hist-cab"><b>${esc(NOTA[n.tipo] || n.tipo)}</b> · ${esc(n.perfil_nombre || '')} · ${esc(fechaHora(n.creado_en))}</span>
-    ${n.texto ? `<p>${esc(n.texto)}</p>` : ''}${n.foto_path ? `<img class="evidencia" data-foto="${esc(n.foto_path)}" alt="Foto" hidden>` : ''}</div>`).join('')}</div>`;
+    ${n.texto ? `<p>${esc(n.texto)}</p>` : ''}${adjuntosHtml(n.foto_path)}</div>`).join('')}</div>`;
 }
 
-// Carga las fotos (bucket evidencias) de los <img data-foto> dentro de raiz; tocar una la abre en grande.
+// Fotos y PDF de un pendiente o nota (una ruta o lista JSON de rutas)
+export function adjuntosHtml(valor) {
+  const l = rutasAdjuntos(valor);
+  if (!l.length) return '';
+  return `<div class="adjuntos">${l.map((r) => (esPdf(r) ? `<a class="btn ghost chico pdf-adj" data-pdf="${esc(r)}" target="_blank" rel="noopener">📄 Abrir PDF</a>`
+    : `<img class="evidencia" data-foto="${esc(r)}" alt="Foto" hidden>`)).join('')}</div>`;
+}
+// Carga las fotos (bucket evidencias) de los <img data-foto> y los PDF <a data-pdf> dentro de raiz; tocar una foto la abre en grande.
 export async function hidratarFotosPend(raiz) {
-  const ims = $$('img[data-foto]', raiz);
-  if (!ims.length) return;
-  const urls = await api.urlsFotos(ims.map((i) => ({ path: i.dataset.foto })), 'evidencias');
+  const ims = $$('img[data-foto]', raiz), pdfs = $$('a[data-pdf]', raiz);
+  if (!ims.length && !pdfs.length) return;
+  const urls = await api.urlsFotos([...ims.map((i) => ({ path: i.dataset.foto })), ...pdfs.map((a) => ({ path: a.dataset.pdf }))], 'evidencias');
   ims.forEach((im) => { const u = urls.get(`${im.dataset.foto}|`); if (u) { im.src = u; im.hidden = false; } });
+  pdfs.forEach((a) => { const u = urls.get(`${a.dataset.pdf}|`); if (u) a.href = u; });
   if (!raiz.dataset.fotosListas) {
     raiz.dataset.fotosListas = '1';
     raiz.addEventListener('click', (e) => {
@@ -60,6 +68,52 @@ export async function hidratarFotosPend(raiz) {
   }
 }
 
+// Comprobantes de pendientes: varias fotos (cámara o galería) y PDF. Devuelve { blob() (hay algo), subir(pendId, prefijo) → valor para p_foto }
+const MAX_PDF = 6 * 1024 * 1024;
+export function campoAdjuntos(cont, texto = 'Foto') {
+  const arch = [];
+  cont.innerHTML = `<div class="adj-campo"><div class="fila-botones" style="margin:0">
+      <label class="btn ghost chico">📷 ${esc(texto)}<input type="file" accept="image/*" capture="environment" class="oculto-accesible" data-cam></label>
+      <label class="btn ghost chico">📎 Foto o PDF<input type="file" accept="image/*,application/pdf,.pdf" multiple class="oculto-accesible" data-arch></label></div>
+    <div class="adj-lista"></div></div>`;
+  const lista = cont.querySelector('.adj-lista');
+  const pintar = () => {
+    lista.innerHTML = arch.map((a, i) => `<span class="adj-chip">${a.pdf ? `📄 ${esc(a.nombre)}` : `<img src="${a.url}" alt="">`}<button type="button" class="enlace" data-q="${i}" aria-label="Quitar">✕</button></span>`).join('');
+  };
+  const agregar = async (files) => {
+    for (const f of files) {
+      if (arch.length >= 6) { aviso('Máximo 6 archivos.', 'info'); break; }
+      const pdf = f.type === 'application/pdf' || /\.pdf$/i.test(f.name);
+      try {
+        if (pdf) {
+          if (f.size > MAX_PDF) { aviso(`${f.name} pesa más de 6 MB.`, 'error'); continue; }
+          arch.push({ pdf: true, nombre: f.name, blob: new Blob([f], { type: 'application/pdf' }) });
+        } else {
+          const blob = await comprimirEvidencia(f);
+          arch.push({ pdf: false, blob, url: URL.createObjectURL(blob) });
+        }
+      } catch { aviso('No se pudo leer un archivo.', 'error'); }
+    }
+    pintar();
+  };
+  cont.querySelectorAll('input[type=file]').forEach((inp) => inp.addEventListener('change', async () => { await agregar([...(inp.files || [])]); inp.value = ''; }));
+  lista.addEventListener('click', (e) => { const q = e.target.closest('[data-q]'); if (q) { const [a] = arch.splice(Number(q.dataset.q), 1); if (a?.url) URL.revokeObjectURL(a.url); pintar(); } });
+  return {
+    blob: () => (arch.length ? arch : null),
+    async subir(pendId, prefijo = null) {
+      if (!arch.length) return null;
+      const base = prefijo || Date.now().toString(36);
+      const rutas = [];
+      for (const [i, a] of arch.entries()) {
+        const ruta = `pendientes/${pendId}/${base}-${i + 1}.${a.pdf ? 'pdf' : 'jpg'}`;
+        await api.subirFoto(ruta, a.blob, 'evidencias');
+        rutas.push(ruta);
+      }
+      return rutas.length === 1 && !a1Pdf(rutas[0]) ? rutas[0] : JSON.stringify(rutas);
+    },
+  };
+}
+const a1Pdf = (r) => esPdf(r);
 // Campo de foto opcional para formularios: devuelve { blob() }
 export function campoFotoOpcional(cont, texto = 'Agregar foto') {
   cont.innerHTML = `<div class="foto-opc"><label class="btn ghost chico">📷 ${esc(texto)}<input type="file" accept="image/*" capture="environment" class="oculto-accesible"></label>

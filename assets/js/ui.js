@@ -228,3 +228,18 @@ export const plural = (txt, n) => {
   if (/^(ml|l|g|gr|kg|oz|lt|cc)$/i.test(txt) || txt.includes(' ')) return txt;
   return /[aeiouáéó]$/i.test(txt) ? txt + 's' : /s$/i.test(txt) ? txt : /z$/i.test(txt) ? txt.slice(0, -1) + 'ces' : /ón$/i.test(txt) ? txt.slice(0, -2) + 'ones' : txt + 'es';
 };
+
+// Accesos de gerencia (el admin tiene todo; gerencia sin lista = todo)
+export const PERMISOS = [['turnos', '🗓️ Turnos', 'Turnos en vivo, calendario, ranking, excusar tareas y aprobar mover tareas'],
+  ['tareas', '✅ Tareas', 'Crear, editar y ordenar tareas y recordatorios'], ['pendientes', '📌 Pendientes', 'Pendientes, incidencias y solicitudes'],
+  ['pedidos', '📦 Pedidos', 'Verificar pedidos y subirlos a Loyverse'], ['conteos', '📋 Conteos', 'Abrir y revisar conteos, cobrar, perdonar y corregir Loyverse'],
+  ['catalogo', '🗂️ Catálogo', 'Artículos, altas y bajas, ajustes de inventario (merma, cortesías…)'], ['caja', '💵 Descuadres de caja', 'Ver y perdonar descuadres de caja'],
+  ['tablero', '📊 Tablero y resumen mensual', 'Ventas, resultados del club y resumen del mes']];
+export const puede = (yo, p) => yo?.rol === 'admin' || (yo?.rol === 'gerencia' && (!Array.isArray(yo.permisos) || yo.permisos.includes(p)));
+// Una evidencia puede ser una ruta o una lista JSON de rutas (varias fotos / PDF)
+export function rutasAdjuntos(v) {
+  if (!v) return [];
+  if (String(v).startsWith('[')) { try { const l = JSON.parse(v); return Array.isArray(l) ? l.filter((x) => typeof x === 'string' && x) : []; } catch { return []; } }
+  return [String(v)];
+}
+export const esPdf = (ruta) => /\.pdf$/i.test(ruta || '');

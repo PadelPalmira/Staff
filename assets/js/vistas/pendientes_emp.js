@@ -2,7 +2,7 @@
 // Puede crear pendientes (para sí o para un compañero), reportar incidencias/imprevistos, pedir cosas y pedir que se cierre algo ya resuelto.
 import * as api from '../api.js';
 import { esc, $, $$, aviso, ventana, conOcupado, mostrarError, quitarError, fechaHora } from '../ui.js';
-import { TIPOS, PRIORIDADES, ZONAS, ESTADOS, tarjetaPendiente, historialHtml, hidratarFotosPend, campoFotoOpcional, subirFotoPend, nuevoId, fechaLimiteTxt } from '../pend.js';
+import { TIPOS, PRIORIDADES, ZONAS, ESTADOS, tarjetaPendiente, historialHtml, hidratarFotosPend, campoAdjuntos, adjuntosHtml, subirFotoPend, nuevoId, fechaLimiteTxt } from '../pend.js';
 
 const ERR = {
   falta_titulo: 'Escribe un título (mínimo 3 letras).', falta_texto: 'Escribe algo o agrega una foto.', perfil_invalido: 'Ese compañero ya no está activo.',
@@ -60,10 +60,10 @@ export function montarPendientesEmp(el, { llamar, perfil, alCambio, inicial = nu
       ${tipo === 'pendiente' && otros.length ? `<div class="campo"><label for="pn-para">¿Para quién?</label><select id="pn-para"><option value="">Para mí</option>
         ${otros.map((c) => `<option value="${esc(c.id)}">${esc(c.nombre)}</option>`).join('')}</select>
         <p class="ayuda">Si es para un compañero, le aparece en sus Pendientes de inmediato. Gerencia puede cancelarlo.</p></div>` : ''}
-      <div class="campo"><label>Foto <span class="opc">(opcional)</span></label><div id="pn-foto"></div></div>
+      <div class="campo"><label>Fotos o PDF <span class="opc">(opcional)</span></label><div id="pn-foto"></div></div>
       <button class="btn" type="submit">${tipo === 'incidencia' ? 'Reportar incidencia' : tipo === 'solicitud' ? 'Enviar solicitud' : 'Crear pendiente'}</button></form>`, { titulo: `${t.ico} ${t.nombre}` });
     const f = $('form', v.el);
-    const foto = campoFotoOpcional($('#pn-foto', f));
+    const foto = campoAdjuntos($('#pn-foto', f), 'Tomar foto');
     f.addEventListener('submit', (e) => {
       e.preventDefault(); quitarError(f);
       let titulo = $('#pn-tit', f).value.trim();
@@ -74,7 +74,7 @@ export function montarPendientesEmp(el, { llamar, perfil, alCambio, inicial = nu
         const id = nuevoId();
         let ruta = null;
         if (foto.blob()) {
-          try { ruta = await subirFotoPend(id, foto.blob(), 'inicial'); }
+          try { ruta = await foto.subir(id, 'inicial'); }
           catch (err) { return mostrarError(f, err.codigo === 'sin_conexion' ? ERR.sin_conexion : 'No se pudo subir la foto. Intenta de nuevo o quítala.'); }
         }
         const r = await llamar('pend_emp_crear', { p_id: id, p_tipo: tipo, p_titulo: titulo, p_descripcion: $('#pn-desc', f).value, p_zona: $('#pn-zona', f).value,
@@ -97,7 +97,7 @@ export function montarPendientesEmp(el, { llamar, perfil, alCambio, inicial = nu
       <dl class="datos">${p.zona ? `<dt>Zona</dt><dd>${esc(p.zona)}</dd>` : ''}${p.asignado_nombre ? `<dt>Para</dt><dd>${esc(p.asignado_nombre)}</dd>` : ''}
         <dt>Lo creó</dt><dd>${esc(p.creado_por_nombre || '—')} · ${esc(fechaHora(p.creado_en))}</dd>${p.resolucion ? `<dt>Resolución</dt><dd>${esc(p.resolucion)}</dd>` : ''}</dl>
       ${p.descripcion ? `<p class="texto-ventana">${esc(p.descripcion)}</p>` : ''}
-      ${p.foto_path ? `<img class="evidencia" data-foto="${esc(p.foto_path)}" alt="Foto" hidden>` : ''}
+      ${adjuntosHtml(p.foto_path)}
       ${historialHtml(p.notas)}
       ${abierto ? `<form class="formulario" id="pd-nota" novalidate style="margin-top:14px">
         <div class="campo"><label for="pd-txt">${p.tipo === 'incidencia' ? '¿Cómo sigue?' : 'Agregar nota o avance'}</label><textarea id="pd-txt" rows="2" placeholder="Escribe aquí…"></textarea></div>
@@ -108,7 +108,7 @@ export function montarPendientesEmp(el, { llamar, perfil, alCambio, inicial = nu
     hidratarFotosPend(v.el);
     const f = $('#pd-nota', v.el);
     if (!f) return;
-    const foto = campoFotoOpcional($('#pd-foto', f), 'Foto (opcional)');
+    const foto = campoAdjuntos($('#pd-foto', f), 'Tomar foto');
     let tipoNota = 'avance';
     $$('button[data-tipo]', f).forEach((b) => b.addEventListener('click', () => { tipoNota = b.dataset.tipo; }));
     f.addEventListener('submit', (e) => {
@@ -119,7 +119,7 @@ export function montarPendientesEmp(el, { llamar, perfil, alCambio, inicial = nu
       if (texto.length < 3 && !foto.blob()) return mostrarError(f, tipoNota === 'solicita_cierre' ? 'Cuenta brevemente qué se hizo (o agrega una foto de cómo quedó).' : ERR.falta_texto);
       conOcupado(boton, async () => {
         let ruta = null;
-        if (foto.blob()) { try { ruta = await subirFotoPend(p.id, foto.blob()); } catch { return mostrarError(f, 'No se pudo subir la foto. Intenta de nuevo.'); } }
+        if (foto.blob()) { try { ruta = await foto.subir(p.id); } catch { return mostrarError(f, 'No se pudo subir la foto. Intenta de nuevo.'); } }
         const r = await llamar('pend_emp_nota', { p_id: p.id, p_tipo: tipoNota, p_texto: texto, p_foto: ruta });
         if (!r.ok) return mostrarError(f, msg(r));
         if (r.notificacion_id) api.avisar(r.notificacion_id);

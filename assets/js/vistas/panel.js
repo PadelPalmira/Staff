@@ -2,7 +2,7 @@
 import * as api from '../api.js';
 import { ventanaCajas, ventanaMover } from './revisiones.js';
 import { APP_VERSION } from '../config.js';
-import { esc, $, $$, ROL, avatar, hidratarAvatares, aviso, conOcupado, primerNombre } from '../ui.js';
+import { esc, $, $$, ROL, avatar, hidratarAvatares, aviso, conOcupado, primerNombre, puede } from '../ui.js';
 import { montarTurnos, pintarEnVivo, verTurno, pintarAvisos, contarAvisos } from './turnos.js';
 import { montarTareasAdmin } from './tareas_admin.js';
 import { montarInventario } from './inventario.js';
@@ -13,7 +13,9 @@ const LLAVE_TAB = 'ppstaff-tab';
 
 export function montarPanel(raiz, ctx, yo) {
   const esAdmin = yo.rol === 'admin';
-  const tabs = [['inicio', 'Inicio', '⌂'], ['turnos', 'Turnos', '◷'], ['tareas', 'Tareas', '✓'], ['pendientes', 'Pendientes', '📌'], ['inventario', 'Inventario', '▤'], ['mas', 'Más', '☰']];
+  const p = (x) => puede(yo, x);
+  const tabs = [['inicio', 'Inicio', '⌂'], ['turnos', 'Turnos', '◷'], ['tareas', 'Tareas', '✓'], ['pendientes', 'Pendientes', '📌'], ['inventario', 'Inventario', '▤'], ['mas', 'Más', '☰']]
+    .filter(([id]) => (id === 'inventario' ? p('pedidos') || p('conteos') || p('catalogo') : ['turnos', 'tareas', 'pendientes'].includes(id) ? p(id) : true));
   let actual = api.leerLocal(LLAVE_TAB);
   if (actual === 'usuarios' || actual === 'ajustes') { api.guardarLocal('ppstaff-mas-vista', actual); actual = 'mas'; }
   if (!tabs.some((t) => t[0] === actual)) actual = 'inicio';
@@ -117,7 +119,8 @@ export function montarPanel(raiz, ctx, yo) {
 
   async function montarInicio(el) {
     el.innerHTML = `<h2 class="saludo">Hola, ${esc(primerNombre(yo.nombre_completo))}</h2>
-      ${esAdmin ? '<button type="button" class="tarjeta boton-tablero" data-ir-tablero><span aria-hidden="true">📊</span><div><b>Tablero del dueño</b><span class="sub">Ventas, cumplimiento, descuadres y costos de la semana o el mes</span></div><i aria-hidden="true">›</i></button>' : ''}
+      ${p('tablero') ? `<button type="button" class="tarjeta boton-tablero" data-ir-tablero><span aria-hidden="true">📊</span><div><b>${esAdmin ? 'Tablero del dueño' : 'Tablero del club'}</b><span class="sub">Ventas, cumplimiento, descuadres y resumen del día, semana o mes</span></div><i aria-hidden="true">›</i></button>` : ''}
+      ${p('caja') ? '<button type="button" class="tarjeta boton-tablero boton-caja" data-ir-cajas><span aria-hidden="true">💵</span><div><b>Descuadres de caja</b><span class="sub">Revisar, perdonar o confirmar cada descuadre</span></div><i aria-hidden="true">›</i></button>' : ''}
       <section class="tarjeta" id="por-hacer"><h2>✅ Por hacer</h2><div class="por-hacer"><p class="cargando">Revisando…</p></div></section>
       ${esAdmin ? '<section class="tarjeta tarjeta-solicitud" id="tarjeta-solicitudes" hidden></section>' : ''}
       <section class="tarjeta tarjeta-avisos" id="tarjeta-avisos" hidden></section>
@@ -139,6 +142,7 @@ export function montarPanel(raiz, ctx, yo) {
     };
     tPend.addEventListener('click', (e) => { if (e.target.closest('[data-ir-pend]')) ir('pendientes'); });
     $('[data-ir-tablero]', el)?.addEventListener('click', () => ir('mas', { vista: 'tablero' }));
+    $('[data-ir-cajas]', el)?.addEventListener('click', () => ventanaCajas(pintarHacer));
     // Por hacer: todo lo que espera una acción de gerencia/admin, con un toque para ir directo
     const tHacer = $('#por-hacer .por-hacer', el);
     const IR = {
@@ -177,7 +181,7 @@ export function montarPanel(raiz, ctx, yo) {
       if (tab === 'turnos') api.guardarLocal('ppstaff-turnos-vista', sub);
       ir(tab, tab === 'mas' ? { vista: sub } : {});
     });
-    const refrescar = () => { pintarEnVivo(vivo); pintarAvisos(tAvisos, yo, refrescar); revisarAvisos(); pintarPend(); pintarHacer(); };
+    const refrescar = () => { pintarEnVivo(vivo); pintarAvisos(tAvisos, yo, refrescar); revisarAvisos(); if (p('pendientes')) pintarPend(); pintarHacer(); };
     refrescar();
     vivo.addEventListener('click', (e) => { const b = e.target.closest('[data-turno]'); if (b) verTurno(b.dataset.turno, yo, refrescar); });
     const reloj = setInterval(() => { if (document.visibilityState === 'visible' && el.isConnected) refrescar(); }, 30000);

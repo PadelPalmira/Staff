@@ -1,6 +1,6 @@
 // Ventanas de gerencia/admin: revisar descuadres de caja (perdonar o confirmar) y aprobar/rechazar tareas que el personal pide mover.
 import * as api from '../api.js';
-import { esc, $, aviso, ventana, conOcupado, pesos, fechaHora } from '../ui.js';
+import { esc, $, aviso, ventana, conOcupado, pesos, fechaHora, PERMISOS } from '../ui.js';
 
 const MOTIVOS_PERDON = ['Error de dedo al capturar', 'Faltaron monedas / sin cambio', 'Error al contar', 'Se aclaró con el empleado'];
 
@@ -103,6 +103,7 @@ export const CATEGORIAS_AVISO = [
   ['inventario', '📦 Inventario', 'Pedidos, lo que llegó mal, conteos, existencias bajas'],
   ['pendientes', '📌 Pendientes e incidencias', 'Nuevos, vencidos, piden cerrarse'],
   ['resumenes', '📊 Resúmenes semanales', 'Desempeño del equipo y actividad de gerencia'],
+  ['mensual', '📈 Resumen del mes', 'Ventas, lo mejor, qué mejorar y qué promover (el día 1)'],
 ];
 export function formPrefsAvisos(cont, perfilId = null) {
   cont.innerHTML = '<p class="cargando">Cargando…</p>';
@@ -124,4 +125,39 @@ export function formPrefsAvisos(cont, perfilId = null) {
     if (!r.ok) { i.checked = !i.checked; return aviso(r.mensaje || 'No se pudo guardar.', 'error'); }
     off = r.off; aviso(i.checked ? 'Activado.' : 'Ya no te llegará esa categoría.', 'ok', 2000);
   });
+}
+
+// ---------- accesos de cada gerente (solo admin) ----------
+export function formAccesos(cont, g, alGuardar) {
+  const sel = new Set(g.permisos || PERMISOS.map(([k]) => k));
+  cont.innerHTML = `${PERMISOS.map(([k, n, d]) => `<label class="interruptor pref-aviso"><input type="checkbox" data-perm="${k}" ${sel.has(k) ? 'checked' : ''}><span>${n}<small>${esc(d)}</small></span></label>`).join('')}
+    <p class="ayuda">Mi cuenta siempre la tiene. Usuarios, Ajustes y Actividad son solo del administrador. Lo que no tenga marcado no le aparece en la app, el servidor no lo deja hacerlo y tampoco le llegan esos avisos.</p>`;
+  cont.addEventListener('change', async (e) => {
+    const i = e.target.closest('[data-perm]'); if (!i) return;
+    const nuevos = [...cont.querySelectorAll('[data-perm]')].filter((x) => x.checked).map((x) => x.dataset.perm);
+    i.disabled = true;
+    let r; try { r = await api.rpc('permisos_guardar', { p_perfil: g.id, p_permisos: nuevos }); } catch (err) { r = { ok: false, mensaje: err.message }; }
+    i.disabled = false;
+    if (!r.ok) { i.checked = !i.checked; return aviso(r.mensaje || 'No se pudo guardar.', 'error'); }
+    g.permisos = r.permisos; aviso(`Accesos de ${g.nombre.split(' ')[0]} guardados.`, 'ok', 2000); alGuardar?.();
+  });
+}
+export function ventanaAccesos(g, alGuardar) {
+  const v = ventana('<div></div>', { titulo: `🔐 Accesos de ${g.nombre}` });
+  formAccesos(v.el.firstElementChild, g, alGuardar);
+}
+export async function seccionAccesos(cont) {
+  cont.innerHTML = '<p class="cargando">Cargando…</p>';
+  let r; try { r = await api.rpc('permisos_lista'); } catch (e) { r = { ok: false, mensaje: e.message }; }
+  if (!r.ok) { cont.innerHTML = `<p class="detalle">${esc(r.mensaje || 'No se pudo cargar.')}</p>`; return; }
+  const gs = (r.gerentes || []).filter((g) => g.estado === 'activo');
+  const pintar = () => {
+    cont.innerHTML = gs.length ? `<p class="detalle" style="margin-top:0">Toca a un gerente para elegir qué partes de la app puede usar.</p><div class="lista">${gs.map((g) => {
+      const n = (g.permisos || []).length;
+      return `<button type="button" class="fila" data-g="${esc(g.id)}"><div class="fila-txt"><b>${esc(g.nombre)}</b>
+        <span>${n === PERMISOS.length ? 'Todo' : n ? PERMISOS.filter(([k]) => g.permisos.includes(k)).map(([, nom]) => nom.replace(/^\S+\s/, '')).join(', ') : 'Solo Mi cuenta'}</span></div>
+        <span class="insignia ${n === PERMISOS.length ? '' : 'aviso-i'}">${n}/${PERMISOS.length}</span></button>`; }).join('')}</div>` : '<p class="detalle" style="margin:0">No hay gerentes activos.</p>';
+  };
+  pintar();
+  cont.onclick = (e) => { const b = e.target.closest('[data-g]'); if (b) ventanaAccesos(gs.find((g) => g.id === b.dataset.g), pintar); };
 }

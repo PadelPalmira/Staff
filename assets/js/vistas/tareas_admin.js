@@ -2,7 +2,7 @@
 import * as api from '../api.js';
 import { esc, $, $$, aviso, ventana, conOcupado } from '../ui.js';
 
-const COLS = 'id,nombre,descripcion,momento,aplica,turnos,dias,horario,regla,minutos,hora,foto,condicional,etiqueta_no_aplica,activa,orden';
+const COLS = 'id,nombre,descripcion,momento,aplica,turnos,dias,horario,regla,minutos,hora,foto,fotos,condicional,etiqueta_no_aplica,activa,orden';
 const TIPOS_DEF = [{ clave: 'manana', nombre: 'Mañana', dias: [1, 2, 3, 4, 5, 6] }, { clave: 'tarde', nombre: 'Tarde', dias: [1, 2, 3, 4, 5, 6] }, { clave: 'domingo', nombre: 'Domingo', dias: [7] }];
 const CORTO = { manana: 'mañana', tarde: 'tarde', domingo: 'domingo' };
 const MOMENTOS = [['apertura', 'Al abrir el turno'], ['semanal', 'Semanales'], ['cierre', 'Al cerrar el turno']];
@@ -116,7 +116,7 @@ export async function montarTareasAdmin(el, ctx, yo) {
       if (!l.length) continue;
       h += `<h3 class="sub-titulo">${titulo}</h3><div class="lista">${l.map((t) => `<button type="button" class="fila ${t.activa ? '' : 'apagada'}" data-id="${esc(t.id)}">
         <div class="fila-txt"><b>${esc(t.nombre)}</b><span>${esc(resumenRegla(t))} · ${esc(resumenQuien(t))}${!t.horario && t.momento === 'semanal' && t.dias ? ` · ${t.dias.map((d) => DIAS_LARGO[d]).join(', ')}` : ''}</span></div>
-        <div class="fila-ins">${t.activa ? '' : '<span class="insignia gris">Apagada</span>'}${t.foto ? '<span>📷</span>' : ''}${t.condicional ? '<span class="insignia aviso-i">Condicional</span>' : ''}</div></button>`).join('')}</div>`;
+        <div class="fila-ins">${t.activa ? '' : '<span class="insignia gris">Apagada</span>'}${t.foto ? `<span>📷${t.fotos?.length > 1 ? `×${t.fotos.length}` : ''}</span>` : ''}${t.condicional ? '<span class="insignia aviso-i">Condicional</span>' : ''}</div></button>`).join('')}</div>`;
     }
     cont.innerHTML = h || '<div class="tarjeta vacio"><p><b>No hay tareas.</b></p><p>Toca “Nueva” para crear la primera.</p></div>';
   }
@@ -173,7 +173,10 @@ export async function montarTareasAdmin(el, ctx, yo) {
         <option value="antes_cierre" ${t.regla === 'antes_cierre' ? 'selected' : ''}>Antes de la hora de salida</option></select></div>
       <div class="campo" id="g-min" hidden><label for="t-min">Minutos después de abrir</label><input id="t-min" type="number" inputmode="numeric" min="0" max="600" value="${t.minutos ?? 15}"></div>
       <div class="campo" id="g-hora" hidden><label for="t-hora">Hora límite</label><input id="t-hora" type="time" value="${esc(String(t.hora || '').slice(0, 5))}"></div>
-      <label class="interruptor"><input type="checkbox" id="t-foto" ${t.foto ? 'checked' : ''}><span>Pide una foto como evidencia</span></label>
+      <label class="interruptor"><input type="checkbox" id="t-foto" ${t.foto ? 'checked' : ''}><span>Pide foto como evidencia</span></label>
+      <div class="campo" id="g-fotos" hidden><label for="t-fotos">¿De qué es cada foto? <span class="opc">(una por renglón; vacío = una sola foto general)</span></label>
+        <textarea id="t-fotos" rows="4" placeholder="WC 1&#10;WC 2&#10;Lavabos&#10;Piso">${esc((t.fotos || []).join('\n'))}</textarea>
+        <p class="ayuda">El empleado tiene que tomar cada foto en ese momento con la cámara (no puede subir fotos viejas) y no puede marcar la tarea hasta tenerlas todas.</p></div>
       <label class="interruptor"><input type="checkbox" id="t-cond" ${t.condicional ? 'checked' : ''}><span>Puede “no aplicar” (ej. “no hubo clases hoy”)</span></label>
       <div class="campo" id="g-etq" hidden><label for="t-etq">Texto del botón “no aplica”</label><input id="t-etq" type="text" value="${esc(t.etiqueta_no_aplica || '')}" placeholder="No aplica hoy"></div>
       <label class="interruptor"><input type="checkbox" id="t-act" ${t.activa ? 'checked' : ''}><span>Tarea activa (si la apagas, deja de aparecer en turnos nuevos)</span></label>
@@ -188,6 +191,7 @@ export async function montarTareasAdmin(el, ctx, yo) {
       $('#g-min', f).hidden = $('#t-reg', f).value !== 'desde_apertura';
       $('#g-hora', f).hidden = $('#t-reg', f).value !== 'hora_fija';
       $('#g-etq', f).hidden = !$('#t-cond', f).checked;
+      $('#g-fotos', f).hidden = !$('#t-foto', f).checked;
     };
     f.addEventListener('change', sync); sync();
     f.addEventListener('submit', (e) => {
@@ -200,6 +204,7 @@ export async function montarTareasAdmin(el, ctx, yo) {
           return [n, v === '*' ? ts : v ? [v] : []];
         }).filter(([, l]) => l.length)) : null,
         regla: $('#t-reg', f).value, minutos: $('#t-min', f).value, hora: $('#t-hora', f).value, foto: $('#t-foto', f).checked,
+        fotos: $('#t-foto', f).checked ? $('#t-fotos', f).value.split('\n').map((x) => x.trim()).filter(Boolean).slice(0, 12) : [],
         condicional: $('#t-cond', f).checked, etiqueta_no_aplica: $('#t-etq', f).value, activa: $('#t-act', f).checked,
       };
       if (datos.horario && !Object.keys(datos.horario).length) return aviso('Elige al menos un día y su turno.', 'error');

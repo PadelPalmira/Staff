@@ -2,7 +2,7 @@
 // crear/editar (asignar a un turno o persona, prioridad, fecha y costo), notas, resolver, cancelar y reabrir.
 import * as api from '../api.js';
 import { esc, $, $$, aviso, ventana, conOcupado, mostrarError, quitarError, fechaHora, pesos } from '../ui.js';
-import { TIPOS, PRIORIDADES, ZONAS, ESTADOS, tarjetaPendiente, historialHtml, hidratarFotosPend, campoFotoOpcional, subirFotoPend, nuevoId, fechaLimiteTxt } from '../pend.js';
+import { TIPOS, PRIORIDADES, ZONAS, ESTADOS, tarjetaPendiente, historialHtml, hidratarFotosPend, campoAdjuntos, adjuntosHtml, subirFotoPend, nuevoId, fechaLimiteTxt } from '../pend.js';
 
 const COLS = 'id,tipo,titulo,descripcion,zona,prioridad,fecha_limite,costo_estimado,asignado_tipo,asignado_perfil,estado,foto_path,creado_por,creado_por_nombre,creado_en,actualizado_en,resuelto_en,resolucion,costo_real';
 const TURNOS = { manana: 'Turno mañana', tarde: 'Turno tarde', domingo: 'Turno domingo' };
@@ -87,10 +87,10 @@ export async function montarPendientes(el, ctx, yo) {
         <p class="ayuda">Sube sola un nivel por cada semana abierto y otro si pasa la fecha límite.</p></div>
       <div class="fila-botones" style="margin:0"><div class="campo"><label for="pg-fecha">Fecha límite <span class="opc">(opcional)</span></label><input id="pg-fecha" type="date" value="${esc(p.fecha_limite || '')}"></div>
         <div class="campo"><label for="pg-costo">Costo estimado <span class="opc">($)</span></label><input id="pg-costo" type="number" inputmode="decimal" min="0" step="1" value="${esc(p.costo_estimado ?? '')}"></div></div>
-      <div class="campo"><label>Foto <span class="opc">(opcional)</span></label><div id="pg-foto"></div></div>
+      <div class="campo"><label>Fotos o PDF <span class="opc">(opcional)</span></label><div id="pg-foto"></div></div>
       <button class="btn" type="submit">${nuevo ? 'Crear' : 'Guardar cambios'}</button></form>`, { titulo: nuevo ? 'Nuevo' : 'Editar' });
     const f = $('form', v.el);
-    const foto = campoFotoOpcional($('#pg-foto', f), p.foto_path ? 'Cambiar foto' : 'Agregar foto');
+    const foto = campoAdjuntos($('#pg-foto', f), 'Tomar foto');
     f.addEventListener('submit', (e) => {
       e.preventDefault(); quitarError(f);
       const titulo = $('#pg-tit', f).value.trim();
@@ -102,7 +102,7 @@ export async function montarPendientes(el, ctx, yo) {
           prioridad: $('input[name=prio]:checked', f)?.value || 2, fecha_limite: $('#pg-fecha', f).value, costo_estimado: $('#pg-costo', f).value,
           asignado_tipo: a.startsWith('t:') ? a.slice(2) : '', asignado_perfil: a.startsWith('p:') ? a.slice(2) : '' };
         if (foto.blob()) {
-          try { datos.foto_path = await subirFotoPend(id, foto.blob(), 'inicial'); } catch { return mostrarError(f, 'No se pudo subir la foto.'); }
+          try { datos.foto_path = await foto.subir(id, 'inicial'); } catch { return mostrarError(f, 'No se pudo subir la foto o el archivo.'); }
         }
         try {
           const r = await api.rpc('pend_guardar', { p_id: id, p_datos: datos });
@@ -127,7 +127,7 @@ export async function montarPendientes(el, ctx, yo) {
         ${p.costo_estimado != null ? `<dt>Costo estimado</dt><dd>${esc(pesos(p.costo_estimado))}</dd>` : ''}${p.costo_real != null ? `<dt>Costo real</dt><dd>${esc(pesos(p.costo_real))}</dd>` : ''}
         ${p.resolucion ? `<dt>Resolución</dt><dd>${esc(p.resolucion)}</dd>` : ''}</dl>
       ${p.descripcion ? `<p class="texto-ventana">${esc(p.descripcion)}</p>` : ''}
-      ${p.foto_path ? `<img class="evidencia" data-foto="${esc(p.foto_path)}" alt="Foto" hidden>` : ''}
+      ${adjuntosHtml(p.foto_path)}
       <form class="formulario" id="pg-nota" novalidate style="margin-top:12px"><div class="campo"><label for="pg-ntxt">Agregar nota</label><textarea id="pg-ntxt" rows="2"></textarea></div>
         <div id="pg-nfoto"></div><button type="submit" class="btn ghost chico">Guardar nota</button></form>
       ${historialHtml(notas)}
@@ -137,14 +137,14 @@ export async function montarPendientes(el, ctx, yo) {
           : '<button type="button" class="btn ghost" data-acc="reabrir">Reabrir</button>'}</div>`);
     hidratarFotosPend(v.el);
     const fn = $('#pg-nota', v.el);
-    const fotoN = campoFotoOpcional($('#pg-nfoto', fn), 'Foto (opcional)');
+    const fotoN = campoAdjuntos($('#pg-nfoto', fn), 'Tomar foto');
     fn.addEventListener('submit', (e) => {
       e.preventDefault(); quitarError(fn);
       const txt = $('#pg-ntxt', fn).value.trim();
       if (txt.length < 2 && !fotoN.blob()) return mostrarError(fn, ERR.falta_texto);
       conOcupado($('button[type=submit]', fn), async () => {
         let ruta = null;
-        if (fotoN.blob()) { try { ruta = await subirFotoPend(p.id, fotoN.blob()); } catch { return mostrarError(fn, 'No se pudo subir la foto.'); } }
+        if (fotoN.blob()) { try { ruta = await fotoN.subir(p.id); } catch { return mostrarError(fn, 'No se pudo subir la foto o el archivo.'); } }
         const r = await api.rpc('pend_nota', { p_id: p.id, p_texto: txt, p_foto: ruta });
         if (!r.ok) return mostrarError(fn, ERR[r.error] || 'No se pudo guardar.');
         v.cerrar(); aviso('Nota guardada.', 'ok'); detalle(p);

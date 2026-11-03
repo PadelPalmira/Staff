@@ -616,3 +616,38 @@ img.evidencia.previa-mini{width:72px;height:72px;object-fit:cover;margin:0;borde
 .caja-li .insignia{margin-top:4px}
 .mover-fila{align-items:flex-start}
 .mover-fila .fila-txt span{white-space:normal}
+
+/* 1.0: accesos, varias fotos por tarea, adjuntos en pendientes, correcciones de conteo y resumen del mes */
+.boton-caja{background:linear-gradient(135deg,rgba(251,191,36,.14),rgba(0,242,234,.08));border-color:rgba(251,191,36,.35)}
+.boton-resumen{margin-bottom:12px}
+.fotos-tarea .foto-item{gap:10px}
+.foto-item .fila-txt{flex:1;min-width:0}
+.foto-item.lista .sub{color:var(--ok)}
+.foto-mini{width:54px;height:54px;object-fit:cover;border-radius:10px;flex:none}
+.fotos-ev{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.fotos-ev figure{margin:0;width:calc(50% - 4px);max-width:200px}
+.fotos-ev figure img.evidencia{max-width:100%;margin-top:0;aspect-ratio:1;object-fit:cover}
+.fotos-ev figcaption{font-size:12px;color:var(--text-2);margin-top:3px}
+.adjuntos{display:flex;flex-wrap:wrap;gap:8px;align-items:flex-start;margin-top:6px}
+.adjuntos img.evidencia{width:calc(50% - 4px);max-width:200px;margin-top:0}
+.pdf-adj{text-decoration:none;display:inline-flex;align-items:center;width:auto}
+.adj-campo .fila-botones label{position:relative;cursor:pointer}
+.adj-lista{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}
+.adj-lista:empty{display:none}
+.adj-chip{display:inline-flex;align-items:center;gap:4px;background:var(--surface-2);border:1px solid var(--border-strong);border-radius:12px;padding:4px 4px 4px 8px;font-size:13px;max-width:100%;overflow:hidden}
+.adj-chip img{width:48px;height:48px;object-fit:cover;border-radius:8px;margin-left:-4px}
+.corregir-btn{font-size:13px;padding:4px 0;display:block}
+.resumen-mes .tarjeta h3{margin:0 0 8px;font-size:16px}
+.rm-lista{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px}
+.rm-lista li{display:flex;flex-direction:column;border-top:1px solid var(--border);padding-top:8px;font-size:14px}
+.rm-lista li:first-child{border-top:0;padding-top:0}
+.rm-lista li span{color:var(--text-2);font-size:13px}
+.rm-bien{border-color:rgba(52,211,153,.35)}
+.rm-mejorar{border-color:rgba(251,191,36,.35)}
+.rm-bien li,.rm-mejorar li{flex-direction:row}
+.rm-barras{display:flex;flex-direction:column;gap:6px}
+.rm-barra{display:grid;grid-template-columns:40px 1fr 74px;align-items:center;gap:8px;font-size:13px}
+.rm-barra span{color:var(--text-2)}
+.rm-barra i{display:block;height:12px;border-radius:6px;background:var(--grad);min-width:2px}
+.rm-barra b{text-align:right;font-weight:600}
+.accesos-lista label{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--border)}

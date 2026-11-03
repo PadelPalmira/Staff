@@ -2,7 +2,7 @@
 // estado de la conexión con Loyverse (vigilancia de cambios raros) y Catálogo (se actualiza solo; altas/bajas/ajustes directo en Loyverse).
 // Regla: el celular del club nunca escribe en Loyverse; solo gerencia/admin, y todo queda registrado.
 import * as api from '../api.js';
-import { esc, $, $$, aviso, ventana, confirmar, conOcupado, fechaCorta, fechaHora, horaCorta, cantidad, pesos, plural, comprimirEvidencia } from '../ui.js';
+import { esc, $, $$, aviso, ventana, confirmar, conOcupado, fechaCorta, fechaHora, horaCorta, cantidad, pesos, plural, comprimirEvidencia, puede } from '../ui.js';
 import { estiloCategoria, miniArticulo, hidratarFotosArticulos } from '../categorias.js';
 
 const ERR = {
@@ -34,11 +34,11 @@ const haceTxt = (iso) => { if (!iso) return 'nunca'; const m = Math.round((Date.
 const signo = (n) => `${Number(n) > 0 ? '+' : ''}${cantidad(n)}`;
 
 export function montarInventario(el, ctx, yo) {
-  let seg = api.leerLocal('ppstaff-inv-seg') || 'pedidos';
-  if (!['pedidos', 'conteos', 'catalogo'].includes(seg)) seg = 'pedidos';
+  const segs = [['pedidos', '📦 Pedidos'], ['conteos', '📋 Conteos'], ['catalogo', '🗂️ Catálogo']].filter(([k]) => puede(yo, k));
+  let seg = api.leerLocal('ppstaff-inv-seg') || segs[0]?.[0];
+  if (!segs.some(([k]) => k === seg)) seg = segs[0]?.[0];
   el.innerHTML = `<div class="enc-seccion"><h2>Inventario</h2></div>
-    <div class="segmentos tres" role="tablist"><button type="button" data-seg="pedidos">📦 Pedidos</button><button type="button" data-seg="conteos">📋 Conteos</button>
-      <button type="button" data-seg="catalogo">🗂️ Catálogo</button></div>
+    ${segs.length > 1 ? `<div class="segmentos ${segs.length === 3 ? 'tres' : ''}" role="tablist">${segs.map(([k, n]) => `<button type="button" data-seg="${k}">${n}</button>`).join('')}</div>` : ''}
     <div id="inv-cont"></div>`;
   function poner(s) {
     seg = s; api.guardarLocal('ppstaff-inv-seg', s);
@@ -47,8 +47,8 @@ export function montarInventario(el, ctx, yo) {
     const nuevo = actual.cloneNode(false); actual.replaceWith(nuevo);
     ({ pedidos: segPedidosYCarga, conteos: segConteos, catalogo: segCatalogo })[s](nuevo, yo, poner);
   }
-  $('.segmentos', el).addEventListener('click', (e) => { const b = e.target.closest('[data-seg]'); if (b) poner(b.dataset.seg); });
-  poner(seg);
+  $('.segmentos', el)?.addEventListener('click', (e) => { const b = e.target.closest('[data-seg]'); if (b) poner(b.dataset.seg); });
+  if (seg) poner(seg);
 }
 
 // ================= PEDIDOS (+ subir a Loyverse) =================
@@ -183,7 +183,7 @@ async function segConteos(el) {
   let conteos, perfiles, tipos, ajustes;
   try {
     [conteos, perfiles, tipos, ajustes] = await Promise.all([
-      api.seleccionar('inv_conteos', 'select=id,fecha,estado,asignado_tipo,asignado_perfil,contado_por_nombre,iniciado_en,enviado_en,revisado_en,faltante,sobrante,deuda,ajuste_aplicado_en,calculo,calculo_error,reconteo_de,articulos&order=creado_en.desc&limit=30'),
+      api.seleccionar('inv_conteos', 'select=id,fecha,estado,asignado_tipo,asignado_perfil,contado_por_nombre,iniciado_en,enviado_en,revisado_en,faltante,sobrante,deuda,ajuste_aplicado_en,lv_omitido_en,calculo,calculo_error,reconteo_de,articulos&order=creado_en.desc&limit=30'),
       api.rpc('listar_personal').catch(() => []),
       api.seleccionar('tipos_turno', 'select=clave,nombre&activo=eq.true&order=orden.asc'),
       api.seleccionar('ajustes', 'select=clave,valor'),
@@ -213,7 +213,7 @@ async function segConteos(el) {
   h += conteos.filter((c) => c.estado !== 'abierto' && !c.reconteo_de).length ? `<div class="lista">${conteos.filter((c) => c.estado !== 'abierto' && !c.reconteo_de).map((c) => {
     const ins = { enviado: c.calculo === 'listo' ? '<span class="insignia aviso-i">Por revisar</span>' : c.calculo === 'error' ? '<span class="insignia mal">Error al calcular</span>' : '<span class="insignia gris">Calculando…</span>', revisado: `<span class="insignia ${Number(c.deuda) > 0 ? 'mal' : ''}">${Number(c.deuda) > 0 ? `Debe ${esc(pesos(c.deuda))}` : 'Sin deuda'}</span>`, cancelado: '<span class="insignia gris">Cancelado</span>' }[c.estado] || '';
     return `<button type="button" class="fila" data-conteo="${esc(c.id)}" ${c.estado === 'cancelado' ? 'disabled' : ''}><div class="fila-txt"><b>Conteo del ${esc(fecha(c.fecha))}</b>
-      <span>${c.contado_por_nombre ? `Contó ${esc(c.contado_por_nombre)}` : ''}${c.enviado_en ? ` · ${esc(fechaHora(c.enviado_en))}` : ''}${c.estado === 'revisado' && !c.ajuste_aplicado_en ? ' · <span class="warn-txt">falta corregir Loyverse</span>' : c.ajuste_aplicado_en ? ' · Loyverse corregido' : ''}</span></div>${ins}</button>`;
+      <span>${c.contado_por_nombre ? `Contó ${esc(c.contado_por_nombre)}` : ''}${c.enviado_en ? ` · ${esc(fechaHora(c.enviado_en))}` : ''}${c.estado === 'revisado' && c.lv_omitido_en ? ' · Loyverse sin cambios (decisión)' : c.estado === 'revisado' && !c.ajuste_aplicado_en ? ' · <span class="warn-txt">falta corregir Loyverse</span>' : c.ajuste_aplicado_en ? ' · Loyverse corregido' : ''}</span></div>${ins}</button>`;
   }).join('')}</div>` : '<p class="detalle">Todavía no hay conteos.</p>';
   h += `<details class="bitacora"><summary>Días y horarios del conteo</summary>${formAjustesConteo(aj, tipos)}</details>`;
   el.innerHTML = h;
@@ -275,7 +275,7 @@ async function verConteo(id, alCambiar) {
   const items = r.items.map((i) => ({ ...i, diferencia: Number(i.diferencia || 0), precio: i.precio == null ? null : Number(i.precio) }));
   const noCobrar = new Map(items.filter((i) => i.no_cobrar).map((i) => [i.articulo_id, i.motivo_no_cobrar || '']));
   const cobrosPrev = new Map((r.cobros || []).map((b) => [b.perfil_id, b]));
-  const conDif = items.filter((i) => i.diferencia !== 0);
+  const conDif = items.filter((i) => i.diferencia !== 0 || i.contado_original != null);
   const prod = conDif.filter((i) => !i.es_insumo), ins = items.filter((i) => i.es_insumo);
   const totales = () => {
     let falt = 0, sobr = 0;
@@ -296,7 +296,9 @@ async function verConteo(id, alCambiar) {
       ${prod.length ? `<h3 class="sub-titulo">Diferencias (a precio de venta)</h3><div class="tabla-dif">${prod.map((i) => `
         <div class="dif-fila ${noCobrar.has(i.articulo_id) ? 'apagada' : ''}" data-art="${esc(i.articulo_id)}">
           <div class="dif-txt"><b>${esc(i.nombre)}</b><span>Esperado ${esc(cantidad(i.esperado))} · contado ${esc(cantidad(i.contado))}${i.precio == null ? ' · <span class="warn-txt">precio variable: $0</span>' : ''}</span>
-            <span class="dif-extra">Loyverse ${esc(cantidad(i.stock_lv))}${Number(i.vendido_despues) ? ` · vendido después de contarlo ${esc(cantidad(i.vendido_despues))}` : ''}${i.reconteo_contado != null ? ` · <b>reconteo: ${esc(cantidad(i.reconteo_contado))}</b> (antes ${esc(signo(i.diferencia_original))})` : ''}</span></div>
+            <span class="dif-extra">Loyverse ${esc(cantidad(i.stock_lv))}${Number(i.vendido_despues) ? ` · vendido después de contarlo ${esc(cantidad(i.vendido_despues))}` : ''}${i.reconteo_contado != null ? ` · <b>reconteo: ${esc(cantidad(i.reconteo_contado))}</b> (antes ${esc(signo(i.diferencia_original))})` : ''}</span>
+            ${i.contado_original != null ? `<span class="dif-extra warn-txt">✏️ Corregido: contaron ${esc(cantidad(i.contado_original))}${i.motivo_correccion ? ` · ${esc(i.motivo_correccion)}` : ''}</span>` : ''}
+            <button type="button" class="enlace corregir-btn" data-corregir>✏️ Corregir lo contado</button></div>
           <div class="dif-num ${i.diferencia < 0 ? 'mal-txt' : 'ok-txt'}"><b>${esc(fmtDif(i))}</b><span>${esc(pesos(Math.abs(i.diferencia) * (i.precio || 0)))}</span></div>
           <label class="no-cobrar"><input type="checkbox" data-nocobrar ${noCobrar.has(i.articulo_id) ? 'checked' : ''}> Perdonar (no cobrar)</label>
           ${aplicado ? '' : `<label class="recontar"><input type="checkbox" data-recontar ${recontar.has(i.articulo_id) ? 'checked' : ''}> Recontar</label>`}
@@ -324,9 +326,15 @@ async function verConteo(id, alCambiar) {
           <select data-via><option value="app" ${prev?.por_app ? 'selected' : ''}>Mandar por la app</option><option value="persona" ${prev && !prev.por_app ? 'selected' : ''}>Lo veo en persona</option></select></div></div>`;
       }).join('') : '<p class="detalle">No hay turnos registrados en ese periodo.</p>'}</div>
       <div class="campo" style="margin-top:10px"><label for="cv-notas">Notas <span class="opc">(internas)</span></label><input id="cv-notas" type="text" value="${esc(c.notas || '')}"></div>
-      <div class="acciones" style="margin-top:12px">${aplicado ? '' : `<button type="button" class="btn" data-guardar>${c.estado === 'revisado' ? 'Guardar cambios' : 'Guardar revisión'}</button>`}
-        ${c.estado === 'revisado' && !aplicado ? '<button type="button" class="btn ghost" data-corregir-lv>⬆︎ Corregir Loyverse con este conteo</button>' : ''}
-        <p class="ayuda">Corregir Loyverse suma/resta cada diferencia en Loyverse para que quede igual a lo que hay de verdad. Hazlo cuando ya no vayas a pedir reconteos.</p></div>`);
+      ${items.length ? `<div class="campo" style="margin-top:12px"><label for="cv-otro">✏️ Corregir lo contado de otro artículo</label><select id="cv-otro"><option value="">— Elegir —</option>
+        ${items.filter((i) => !prod.includes(i)).map((i) => `<option value="${esc(i.articulo_id)}">${esc(i.nombre)} (contado ${esc(cantidad(i.reconteo_contado ?? i.contado))})</option>`).join('')}</select></div>` : ''}
+      <div class="acciones" style="margin-top:12px"><button type="button" class="btn" data-guardar>${aplicado ? '🤝 Guardar perdón y cobros' : c.estado === 'revisado' ? 'Guardar cambios' : 'Guardar revisión'}</button>
+        ${aplicado ? '<p class="ayuda">Aunque Loyverse ya se corrigió, puedes perdonar artículos o cambiar los cobros cuando quieras (por ejemplo, si días después aparece lo que faltaba).</p>' : ''}
+        ${c.estado === 'revisado' && !aplicado && c.lv_omitido_en ? `<p class="nota-info">⏸️ Se decidió <b>no</b> actualizar Loyverse con este conteo${c.lv_omitido_motivo ? `: “${esc(c.lv_omitido_motivo)}”` : ''}.</p>
+          <button type="button" class="btn ghost" data-lv-reactivar>⬆︎ Mejor sí corregir Loyverse</button>` : ''}
+        ${c.estado === 'revisado' && !aplicado && !c.lv_omitido_en ? `<div class="fila-botones" style="margin:0"><button type="button" class="btn ghost" data-corregir-lv>⬆︎ Corregir Loyverse con este conteo</button>
+          <button type="button" class="btn ghost" data-lv-omitir>No actualizar Loyverse</button></div>
+          <p class="ayuda">Corregir Loyverse suma/resta cada diferencia en Loyverse para que quede igual a lo que hay de verdad. Hazlo cuando ya no vayas a pedir reconteos. Si el conteo tuvo un error y no conviene tocar Loyverse, usa “No actualizar Loyverse”.</p>` : ''}</div>`);
   }
   pintar();
   v.el.addEventListener('change', (e) => {
@@ -339,7 +347,52 @@ async function verConteo(id, alCambiar) {
       for (const [pid, , via] of vals) { const x = $(`#cv-cobros [data-perfil="${pid}"]`, v.el); if (x) $('[data-via]', x).value = via; }
     }
   });
+  const corregir = (art) => {
+    const i = items.find((x) => x.articulo_id === art); if (!i) return;
+    const w = ventana(`<form class="formulario" novalidate><p class="detalle" style="margin-top:0"><b>${esc(i.nombre)}</b> · esperado ${esc(cantidad(i.esperado))} · contaron ${esc(cantidad(i.reconteo_contado ?? i.contado))}</p>
+      <div class="campo"><label for="cc-n">¿Cuánto hay de verdad? (${esc(unidadTxt(i, 2))})</label><input id="cc-n" type="number" inputmode="decimal" min="0" step="any" value="${esc(i.reconteo_contado ?? i.contado)}"></div>
+      <div class="campo"><label for="cc-m">¿Por qué se corrige?</label><input id="cc-m" type="text" maxlength="200" placeholder="Ej. había una caja en la bodega que no contaron"></div>
+      ${aplicado ? '<p class="nota-aviso">Loyverse ya se corrigió con este conteo: la diferencia de esta corrección queda como ajuste por aplicar en Loyverse (Inventario › Pedidos › Por aplicar).</p>' : ''}
+      <button class="btn" type="submit">Guardar corrección</button></form>`, { titulo: '✏️ Corregir conteo' });
+    $('form', w.el).addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const n = $('#cc-n', w.el).value, m = $('#cc-m', w.el).value.trim();
+      if (n === '' || Number(n) < 0) return aviso('Escribe la cantidad.', 'error');
+      if (m.length < 3) return aviso('Escribe por qué se corrige.', 'error');
+      conOcupado($('button[type=submit]', w.el), async () => {
+        const x = await rpc('inv_conteo_corregir', { p_conteo: c.id, p_articulo: i.articulo_id, p_contado: Number(n), p_motivo: m });
+        if (!x.ok) return aviso(x.error === 'no_disponible' ? 'Este conteo ya no se puede corregir.' : msg(x), 'error');
+        w.cerrar(); v.cerrar();
+        aviso(x.sin_cambio ? 'Sin cambios.' : x.ajuste_id ? 'Corregido. Quedó un ajuste por aplicar en Loyverse.' : 'Corregido. Ya se recalculó la diferencia.', 'ok', 6000);
+        verConteo(c.id, alCambiar); alCambiar();
+      });
+    });
+  };
+  v.el.addEventListener('change', (e) => { if (e.target.id === 'cv-otro' && e.target.value) { corregir(e.target.value); e.target.value = ''; } });
   v.el.addEventListener('click', (e) => {
+    const co = e.target.closest('[data-corregir]');
+    if (co) return corregir(co.closest('[data-art]').dataset.art);
+    const om = e.target.closest('[data-lv-omitir]');
+    if (om) {
+      const w = ventana(`<form class="formulario" novalidate><p class="detalle" style="margin-top:0">Loyverse se queda como está. El conteo, las diferencias y los cobros se guardan igual.</p>
+        <div class="campo"><label for="om-m">¿Por qué no se actualiza?</label><input id="om-m" type="text" maxlength="200" placeholder="Ej. el conteo tuvo un error, se va a repetir"></div>
+        <button class="btn" type="submit">No actualizar Loyverse</button></form>`, { titulo: 'No actualizar Loyverse' });
+      $('form', w.el).addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        conOcupado($('button[type=submit]', w.el), async () => {
+          const x = await rpc('inv_conteo_lv_omitir', { p_conteo: c.id, p_omitir: true, p_motivo: $('#om-m', w.el).value });
+          if (!x.ok) return aviso(x.error === 'falta_motivo' ? 'Escribe el motivo.' : msg(x), 'error');
+          w.cerrar(); v.cerrar(); aviso('Listo: Loyverse no se va a tocar con este conteo.', 'ok', 5000); alCambiar();
+        });
+      });
+      return;
+    }
+    const re = e.target.closest('[data-lv-reactivar]');
+    if (re) return conOcupado(re, async () => {
+      const x = await rpc('inv_conteo_lv_omitir', { p_conteo: c.id, p_omitir: false, p_motivo: null });
+      if (!x.ok) return aviso(msg(x), 'error');
+      v.cerrar(); verConteo(c.id, alCambiar); alCambiar();
+    });
     const rq = e.target.closest('[data-reconteo]');
     if (rq) {
       if (!recontar.size) return aviso('Marca “Recontar” en los artículos que quieres que vuelvan a contar.', 'error');
