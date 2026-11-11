@@ -258,6 +258,21 @@ export function sugerirParejas(items) {
   return parejas;
 }
 
+// Ventana para pedir un texto obligatorio (mínimo 3 letras). Devuelve el texto o null si se cancela.
+function pedirTexto(titulo, etiqueta, placeholder = '') {
+  return new Promise((res) => {
+    let listo = false;
+    const w = ventana(`<form class="formulario" novalidate><div class="campo"><label for="pt-t">${esc(etiqueta)}</label><input id="pt-t" type="text" maxlength="200" placeholder="${esc(placeholder)}"></div>
+      <button class="btn" type="submit">Continuar</button></form>`, { titulo, alCerrar: () => { if (!listo) res(null); } });
+    $('form', w.el).addEventListener('submit', (e) => {
+      e.preventDefault();
+      const t = $('#pt-t', w.el).value.trim();
+      if (t.length < 3) return aviso('Escribe el motivo.', 'error');
+      listo = true; w.cerrar(); res(t);
+    });
+  });
+}
+
 async function verConteo(id, alCambiar) {
   const v = ventana('<p class="cargando">Cargando…</p>', { titulo: 'Conteo de inventario' });
   const r = await rpc('inv_conteo_resultado', { p_id: id });
@@ -269,7 +284,6 @@ async function verConteo(id, alCambiar) {
       <div class="acciones"><button type="button" class="btn ghost" data-cerrar>Cerrar</button></div>`);
     return;
   }
-  const recontar = new Set();
   const [perfiles, tipos] = await Promise.all([api.rpc('listar_personal').catch(() => []), api.seleccionar('tipos_turno', 'select=clave,nombre&activo=eq.true&order=orden.asc').catch(() => [])]);
   const aplicado = !!c.ajuste_aplicado_en;
   const items = r.items.map((i) => ({ ...i, diferencia: Number(i.diferencia || 0), precio: i.precio == null ? null : Number(i.precio) }));
@@ -290,6 +304,8 @@ async function verConteo(id, alCambiar) {
     v.poner(`<p class="detalle" style="margin-top:0">Conteo del ${esc(fecha(c.fecha))} · contó ${esc(c.contado_por_nombre || '¿?')}${c.enviado_en ? ` · ${esc(fechaHora(c.enviado_en))}` : ''}.
       Esperado = lo que decía Loyverse al enviar el conteo + lo que se vendió después de contar cada artículo ± pedidos y ajustes que Loyverse aún no tenía.
       ${aplicado ? `<br><b class="ok-txt">✓ Loyverse ya se corrigió con este conteo (${esc(fechaHora(c.ajuste_aplicado_en))}).</b>` : ''}</p>
+      ${c.estado === 'enviado' && r.explicar_hasta ? (new Date(r.explicar_hasta) > new Date() ? `<p class="nota-info">💬 Los empleados pueden explicar las diferencias en su app hasta el <b>${esc(fechaHora(r.explicar_hasta))}</b> (puedes cerrar antes si ya está claro)</p>`
+        : '<p class="nota-info">💬 Ya terminó el tiempo para que los empleados expliquen. Decide qué se cobra y cierra el conteo.</p>') : ''}
       ${(r.reconteos || []).map((x) => `<p class="nota-info">🔁 Reconteo de ${x.articulos} artículo${x.articulos === 1 ? '' : 's'}: ${x.estado === 'abierto' ? 'esperando que lo hagan' : x.calculo === 'listo' ? `listo (contó ${esc(x.contado_por_nombre || '')}); su resultado ya se usa abajo` : 'calculando…'}</p>`).join('')}
       <div class="cifras tres"><div><b class="mal-txt">${esc(pesos(t.falt))}</b><span>Faltante</span></div><div><b class="ok-txt">${esc(pesos(t.sobr))}</b><span>Sobrante</span></div>
         <div><b>${esc(pesos(t.deuda))}</b><span>Deuda (faltante − sobrante)</span></div></div>
@@ -298,16 +314,12 @@ async function verConteo(id, alCambiar) {
           <div class="dif-txt"><b>${esc(i.nombre)}</b><span>Esperado ${esc(cantidad(i.esperado))} · contado ${esc(cantidad(i.contado))}${i.precio == null ? ' · <span class="warn-txt">precio variable: $0</span>' : ''}</span>
             <span class="dif-extra">Loyverse ${esc(cantidad(i.stock_lv))}${Number(i.vendido_despues) ? ` · vendido después de contarlo ${esc(cantidad(i.vendido_despues))}` : ''}${i.reconteo_contado != null ? ` · <b>reconteo: ${esc(cantidad(i.reconteo_contado))}</b> (antes ${esc(signo(i.diferencia_original))})` : ''}</span>
             ${i.contado_original != null ? `<span class="dif-extra warn-txt">✏️ Corregido: contaron ${esc(cantidad(i.contado_original))}${i.motivo_correccion ? ` · ${esc(i.motivo_correccion)}` : ''}</span>` : ''}
-            <button type="button" class="enlace corregir-btn" data-corregir>✏️ Corregir lo contado</button></div>
+            ${(i.explicaciones || []).map((x) => `<span class="dif-extra expl">💬 <b>${esc(x.nombre)}:</b> ${esc(x.texto)}</span>`).join('')}
+            <button type="button" class="enlace corregir-btn" data-corregir>✏️ Se contó mal: corregir</button></div>
           <div class="dif-num ${i.diferencia < 0 ? 'mal-txt' : 'ok-txt'}"><b>${esc(fmtDif(i))}</b><span>${esc(pesos(Math.abs(i.diferencia) * (i.precio || 0)))}</span></div>
           <label class="no-cobrar"><input type="checkbox" data-nocobrar ${noCobrar.has(i.articulo_id) ? 'checked' : ''}> Perdonar (no cobrar)</label>
-          ${aplicado ? '' : `<label class="recontar"><input type="checkbox" data-recontar ${recontar.has(i.articulo_id) ? 'checked' : ''}> Recontar</label>`}
         </div>`).join('')}</div>
-        ${aplicado ? '' : `<div class="fila-botones" style="margin:8px 0 0"><select id="cv-rq"><option value="tipo:cualquiera">Quien esté en turno</option>
-          ${tipos.map((t) => `<option value="tipo:${esc(t.clave)}">Turno ${esc(t.nombre)}</option>`).join('')}
-          ${perfiles.filter((p) => p.id !== c.contado_por).map((p) => `<option value="perfil:${esc(p.id)}">${esc(p.nombre_completo)}</option>`).join('')}</select>
-          <button type="button" class="btn chico ghost" data-reconteo>🔁 Pedir reconteo de los marcados</button></div>
-          <p class="ayuda">El reconteo es a ciegas (no ven lo esperado). Lo ideal es que lo haga otra persona. Su resultado reemplaza la diferencia de esos artículos.</p>`}` : '<p class="nota-info">Todo cuadró en los productos. 🎉</p>'}
+        <p class="ayuda">Por cada artículo decide: se cobra (no hagas nada), “Perdonar (no cobrar)” o, si se contó mal, “Se contó mal: corregir” y pon la cantidad real.</p>` : '<p class="nota-info">Todo cuadró en los productos. 🎉</p>'}
       ${parejas.length ? `<h3 class="sub-titulo">Dónde probablemente se equivocaron</h3><ul class="parejas">${parejas.map((p) => `<li>${p.misma ? '🔁' : '↔︎'} Registraron <b>${esc(p.sobra.nombre)}</b> pero entregaron <b>${esc(p.falta.nombre)}</b>${p.n > 1 ? ` (×${esc(cantidad(p.n))})` : ''}
         <span>${p.dif > 0 ? `faltan ${esc(pesos(p.dif))}` : p.dif < 0 ? `sobran ${esc(pesos(-p.dif))}` : 'mismo precio'}${p.misma ? ' · mismo producto, otro sabor' : ''}</span></li>`).join('')}</ul>` : ''}
       ${ins.length ? `<h3 class="sub-titulo">Insumos (solo reporte, no se cobran · tolerancia ${tol}%)</h3><div class="tabla-dif">${ins.map((i) => {
@@ -321,14 +333,19 @@ async function verConteo(id, alCambiar) {
       <div class="lista" id="cv-cobros">${r.trabajaron.length ? r.trabajaron.map((p) => {
         const prev = cobrosPrev.get(p.perfil_id);
         const sug = Math.round(t.deuda * p.turnos / totalTurnos * 100) / 100;
-        return `<div class="fila inv cobro" data-perfil="${esc(p.perfil_id)}"><div class="fila-txt"><b>${esc(p.nombre)}</b><span>${p.turnos} turno${p.turnos === 1 ? '' : 's'} · sugerido ${esc(pesos(sug))}</span></div>
-          <div class="cobro-ctl"><input type="number" inputmode="decimal" min="0" step="any" data-monto value="${esc(prev ? prev.monto : (t.deuda > 0 && r.desde ? sug : 0))}" aria-label="Monto">
-          <select data-via><option value="app" ${prev?.por_app ? 'selected' : ''}>Mandar por la app</option><option value="persona" ${prev && !prev.por_app ? 'selected' : ''}>Lo veo en persona</option></select></div></div>`;
+        const fijo = prev && prev.pago_estado && prev.pago_estado !== 'debe';
+        return `<div class="fila inv cobro" data-perfil="${esc(p.perfil_id)}"><div class="fila-txt"><b>${esc(p.nombre)}</b><span>${p.turnos} turno${p.turnos === 1 ? '' : 's'} · sugerido ${esc(pesos(sug))}</span>
+          ${prev ? `<span>${prev.pago_estado === 'pagado' ? '<b class="ok-txt">✅ Ya pagó</b>' : prev.pago_estado === 'por_confirmar' ? '<b class="warn-txt">⏳ Avisó que pagó (confírmalo en Cobros a empleados)</b>' : prev.por_app ? '<b class="mal-txt">Debe</b>' : ''}</span>` : ''}</div>
+          <div class="cobro-ctl"><input type="number" inputmode="decimal" min="0" step="any" data-monto value="${esc(prev ? prev.monto : (t.deuda > 0 && r.desde ? sug : 0))}" aria-label="Monto" ${fijo ? 'disabled' : ''}>
+          <select data-via ${fijo ? 'disabled' : ''}><option value="app" ${prev?.por_app ? 'selected' : ''}>Mandar por la app</option><option value="persona" ${prev && !prev.por_app ? 'selected' : ''}>Lo veo en persona</option></select></div></div>`;
       }).join('') : '<p class="detalle">No hay turnos registrados en ese periodo.</p>'}</div>
       <div class="campo" style="margin-top:10px"><label for="cv-notas">Notas <span class="opc">(internas)</span></label><input id="cv-notas" type="text" value="${esc(c.notas || '')}"></div>
       ${items.length ? `<div class="campo" style="margin-top:12px"><label for="cv-otro">✏️ Corregir lo contado de otro artículo</label><select id="cv-otro"><option value="">— Elegir —</option>
         ${items.filter((i) => !prod.includes(i)).map((i) => `<option value="${esc(i.articulo_id)}">${esc(i.nombre)} (contado ${esc(cantidad(i.reconteo_contado ?? i.contado))})</option>`).join('')}</select></div>` : ''}
-      <div class="acciones" style="margin-top:12px"><button type="button" class="btn" data-guardar>${aplicado ? '🤝 Guardar perdón y cobros' : c.estado === 'revisado' ? 'Guardar cambios' : 'Guardar revisión'}</button>
+      <div class="acciones" style="margin-top:12px">${c.estado === 'enviado' ? `<button type="button" class="btn grande" data-cerrar-lv>✅ Cerrar conteo y actualizar Loyverse</button>
+        <p class="ayuda">Guarda lo que se cobra y lo que se perdona, le manda los cobros a los empleados y deja Loyverse igual a lo contado (con tus correcciones).</p>
+        <div class="fila-botones" style="margin:0"><button type="button" class="btn ghost" data-cerrar-sin>Cerrar sin actualizar Loyverse</button><button type="button" class="btn ghost" data-guardar>Solo guardar</button></div>`
+        : `<button type="button" class="btn" data-guardar>${aplicado ? '🤝 Guardar perdón y cobros' : 'Guardar cambios'}</button>`}
         ${aplicado ? '<p class="ayuda">Aunque Loyverse ya se corrigió, puedes perdonar artículos o cambiar los cobros cuando quieras (por ejemplo, si días después aparece lo que faltaba).</p>' : ''}
         ${c.estado === 'revisado' && !aplicado && c.lv_omitido_en ? `<p class="nota-info">⏸️ Se decidió <b>no</b> actualizar Loyverse con este conteo${c.lv_omitido_motivo ? `: “${esc(c.lv_omitido_motivo)}”` : ''}.</p>
           <button type="button" class="btn ghost" data-lv-reactivar>⬆︎ Mejor sí corregir Loyverse</button>` : ''}
@@ -339,7 +356,6 @@ async function verConteo(id, alCambiar) {
   pintar();
   v.el.addEventListener('change', (e) => {
     const f = e.target.closest('[data-art]');
-    if (f && e.target.matches('[data-recontar]')) { if (e.target.checked) recontar.add(f.dataset.art); else recontar.delete(f.dataset.art); return; }
     if (f && e.target.matches('[data-nocobrar]')) {
       if (e.target.checked) noCobrar.set(f.dataset.art, ''); else noCobrar.delete(f.dataset.art);
       const vals = [...$$('#cv-cobros [data-perfil]', v.el)].map((x) => [x.dataset.perfil, $('[data-monto]', x).value, $('[data-via]', x).value]);
@@ -393,16 +409,6 @@ async function verConteo(id, alCambiar) {
       if (!x.ok) return aviso(msg(x), 'error');
       v.cerrar(); verConteo(c.id, alCambiar); alCambiar();
     });
-    const rq = e.target.closest('[data-reconteo]');
-    if (rq) {
-      if (!recontar.size) return aviso('Marca “Recontar” en los artículos que quieres que vuelvan a contar.', 'error');
-      const [tipo, val] = $('#cv-rq', v.el).value.split(':');
-      return conOcupado(rq, async () => {
-        const x = await rpc('inv_reconteo_pedir', { p_conteo: c.id, p_articulos: [...recontar], p_tipo: tipo === 'tipo' ? val : null, p_perfil: tipo === 'perfil' ? val : null });
-        if (!x.ok) return aviso(msg(x), 'error');
-        v.cerrar(); aviso(`Reconteo pedido (${recontar.size} artículo${recontar.size === 1 ? '' : 's'}). Ya aparece en el celular del club.`, 'ok', 6000); alCambiar();
-      });
-    }
     const cl = e.target.closest('[data-corregir-lv]');
     if (cl) {
       return (async () => {
@@ -414,19 +420,38 @@ async function verConteo(id, alCambiar) {
         });
       })();
     }
-    const g = e.target.closest('[data-guardar]');
+    const g = e.target.closest('[data-guardar], [data-cerrar-lv], [data-cerrar-sin]');
     if (!g) return;
+    const modo = g.matches('[data-cerrar-lv]') ? 'lv' : g.matches('[data-cerrar-sin]') ? 'sin' : 'guardar';
     const cobros = $$('#cv-cobros [data-perfil]', v.el).map((x) => ({ perfil_id: x.dataset.perfil, monto: Number($('[data-monto]', x).value) || 0, por_app: $('[data-via]', x).value === 'app' }));
     const suma = cobros.reduce((s, b) => s + b.monto, 0), t = totales();
-    conOcupado(g, async () => {
-      if (Math.abs(suma - t.deuda) > 0.5 && !await confirmar({ titulo: 'Montos distintos a la deuda', texto: `La deuda es ${pesos(t.deuda)} y los cobros suman ${pesos(suma)}. ¿Guardar así?`, ok: 'Guardar así' })) return;
-      const r2 = await rpc('inv_conteo_revisar', { p_id: c.id, p_no_cobrar: Object.fromEntries(noCobrar), p_cobros: cobros, p_notas: $('#cv-notas', v.el).value });
-      if (!r2.ok) return aviso(msg(r2), 'error');
-      v.cerrar();
-      const app = cobros.filter((b) => b.por_app && b.monto > 0).length;
-      aviso(`Revisión guardada. Deuda ${pesos(r2.deuda)}${app ? ` · enviado por la app a ${app} empleado${app === 1 ? '' : 's'}` : ''}.`, 'ok', 6000);
-      alCambiar();
-    });
+    (async () => {
+      let motivoSin = null;
+      if (modo === 'sin') {
+        motivoSin = await pedirTexto('No actualizar Loyverse', '¿Por qué no se actualiza Loyverse con este conteo?', 'Ej. el conteo tuvo un error, se va a repetir');
+        if (!motivoSin) return;
+      }
+      if (modo === 'lv' && !await confirmar({ titulo: 'Cerrar conteo', texto: `Se guardan los cobros (${pesos(suma)}) y lo perdonado, y Loyverse queda igual a lo contado${prod.some((i) => i.contado_original != null) ? ' (con tus correcciones)' : ''}. ¿Seguir?`, ok: 'Cerrar y actualizar' })) return;
+      conOcupado(g, async () => {
+        if (Math.abs(suma - t.deuda) > 0.5 && !await confirmar({ titulo: 'Montos distintos a la deuda', texto: `La deuda es ${pesos(t.deuda)} y los cobros suman ${pesos(suma)}. ¿Guardar así?`, ok: 'Guardar así' })) return;
+        const r2 = await rpc('inv_conteo_revisar', { p_id: c.id, p_no_cobrar: Object.fromEntries(noCobrar), p_cobros: cobros, p_notas: $('#cv-notas', v.el).value });
+        if (!r2.ok) return aviso(r2.error === 'cobro_pagado' ? 'Alguien ya pagó (o avisó que pagó) su cobro: ese cobro ya no se puede cambiar ni quitar. Primero rechaza o deshaz el pago en Cobros a empleados.' : msg(r2), 'error', 8000);
+        const app = cobros.filter((b) => b.por_app && b.monto > 0).length;
+        const base = `Deuda ${pesos(r2.deuda)}${app ? ` · enviado por la app a ${app} empleado${app === 1 ? '' : 's'}` : ''}`;
+        if (modo === 'lv') {
+          const x = await lv('aplicar', { origen: 'conteo', id: c.id });
+          v.cerrar(); alCambiar();
+          if (!x.ok) return aviso(`Conteo cerrado (${base}), pero no se pudo actualizar Loyverse: ${msg(x)}. Reinténtalo en Inventario › Pedidos › Por aplicar.`, 'error', 9000);
+          return aviso(`Conteo cerrado. ${base} · Loyverse corregido (${x.lineas} artículo${x.lineas === 1 ? '' : 's'}).`, 'ok', 7000);
+        }
+        if (modo === 'sin') {
+          const x = await rpc('inv_conteo_lv_omitir', { p_conteo: c.id, p_omitir: true, p_motivo: motivoSin });
+          v.cerrar(); alCambiar();
+          return aviso(x.ok ? `Conteo cerrado sin tocar Loyverse. ${base}.` : `Conteo cerrado (${base}), pero no se guardó lo de Loyverse: ${msg(x)}`, x.ok ? 'ok' : 'error', 7000);
+        }
+        v.cerrar(); aviso(`Revisión guardada. ${base}.`, 'ok', 6000); alCambiar();
+      });
+    })();
   });
 }
 

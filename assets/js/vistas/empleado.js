@@ -117,7 +117,7 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
   // ---------- datos ----------
   function badgeInv(r) {
     invEst = r;
-    const n = (r?.conteo ? 1 : 0) + (r?.cobros || []).filter((b) => !b.visto_en).length;
+    const n = (r?.conteo ? 1 : 0) + (r?.cobros || []).filter((b) => !b.visto_en || b.pago_estado === 'debe').length + (Number(r?.difs_explicar) || 0);
     const b = $('[data-badge-inv]', raiz);
     if (b) { b.hidden = !n; b.textContent = n ? String(n) : ''; }
   }

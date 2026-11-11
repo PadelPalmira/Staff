@@ -651,3 +651,20 @@ img.evidencia.previa-mini{width:72px;height:72px;object-fit:cover;margin:0;borde
 .rm-barra i{display:block;height:12px;border-radius:6px;background:var(--grad);min-width:2px}
 .rm-barra b{text-align:right;font-weight:600}
 .accesos-lista label{display:flex;gap:10px;align-items:flex-start;padding:8px 0;border-top:1px solid var(--border)}
+
+/* 1.1: cobros con pago del empleado, explicaciones de diferencias y aviso de tickets abiertos */
+.boton-cobros{background:linear-gradient(135deg,rgba(251,113,133,.12),rgba(0,242,234,.06));border-color:rgba(251,113,133,.35)}
+.opciones-pago{display:flex;flex-direction:column;gap:8px}
+.opcion-pago{display:flex;align-items:center;gap:10px;border:1px solid var(--border-strong);border-radius:12px;padding:12px;background:var(--surface-2);cursor:pointer;min-height:48px}
+.opcion-pago:has(input:checked){border-color:var(--cyan);background:rgba(0,242,234,.08)}
+.opcion-pago input{width:20px;height:20px;flex:none}
+fieldset.campo{border:0;padding:0;margin:0 0 12px}
+fieldset.campo legend{font-weight:600;margin-bottom:8px;padding:0}
+.chips-rapidos{display:flex;flex-wrap:wrap;gap:6px;margin:-4px 0 12px}
+.dif-emp .fila-txt span{white-space:normal}
+.dif-emp .btn{flex:none}
+.dif-extra.expl{color:var(--text);background:var(--surface-2);border-radius:8px;padding:4px 8px;margin-top:4px;display:block}
+.cobro-pend h2,.cobro-espera h2{margin-bottom:4px}
+.cobro-espera{border-color:rgba(251,191,36,.35)}
+.difs-conteo{border-color:rgba(0,242,234,.35)}
+.aviso-tickets{font-size:15px}

@@ -100,12 +100,12 @@ export function campoAdjuntos(cont, texto = 'Foto') {
   lista.addEventListener('click', (e) => { const q = e.target.closest('[data-q]'); if (q) { const [a] = arch.splice(Number(q.dataset.q), 1); if (a?.url) URL.revokeObjectURL(a.url); pintar(); } });
   return {
     blob: () => (arch.length ? arch : null),
-    async subir(pendId, prefijo = null) {
+    async subir(pendId, prefijo = null, carpeta = 'pendientes') {
       if (!arch.length) return null;
       const base = prefijo || Date.now().toString(36);
       const rutas = [];
       for (const [i, a] of arch.entries()) {
-        const ruta = `pendientes/${pendId}/${base}-${i + 1}.${a.pdf ? 'pdf' : 'jpg'}`;
+        const ruta = `${carpeta}/${pendId}/${base}-${i + 1}.${a.pdf ? 'pdf' : 'jpg'}`;
         await api.subirFoto(ruta, a.blob, 'evidencias');
         rutas.push(ruta);
       }

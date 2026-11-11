@@ -12,6 +12,10 @@ export function difTxt(d) {
 export function insigniaRevision(c) {
   if (c.revision === 'perdonado') return '<span class="insignia gris">Perdonado</span>';
   if (c.revision === 'real') return '<span class="insignia mal">Descuadre real</span>';
+  if (c.revision === 'cobrado') {
+    const b = (c.cobros || [])[0];
+    return b?.pago_estado === 'pagado' ? '<span class="insignia">Cobrado · pagó</span>' : b?.pago_estado === 'por_confirmar' ? '<span class="insignia aviso-i">Pago por confirmar</span>' : '<span class="insignia mal">Cobrado · debe</span>';
+  }
   if (c.sobre_margen) return '<span class="insignia aviso-i">Por revisar</span>';
   return '';
 }
@@ -22,12 +26,14 @@ export function ventanaCaja(c, alListo) {
       <dt>Empleado</dt><dd>${esc(c.empleado || c.cerro || '¿?')}${c.cerro && c.empleado && c.cerro !== c.empleado ? ` <small>(en Loyverse: ${esc(c.cerro)})</small>` : ''}</dd>
       <dt>Esperado</dt><dd>${pesos(c.esperado)}</dd><dt>Contado</dt><dd>${pesos(c.real)}</dd><dt>Diferencia</dt><dd>${difTxt(c.diferencia)}</dd>
       <dt>Razón del empleado</dt><dd>${c.razon ? `“${esc(c.razon)}”` : '<span class="sub">No escribió razón</span>'}</dd>
-      ${c.revision ? `<dt>Revisión</dt><dd>${c.revision === 'perdonado' ? 'Perdonado' : 'Descuadre real'}${c.revision_motivo ? `: ${esc(c.revision_motivo)}` : ''} <small>(${esc(c.revision_nombre || '')})</small></dd>` : ''}</dl>
-    ${c.revision ? `<div class="acciones"><button type="button" class="btn ghost" data-quitar>Quitar la revisión</button></div>` : `<form class="formulario" novalidate style="margin-top:8px">
+      ${c.revision ? `<dt>Revisión</dt><dd>${c.revision === 'perdonado' ? 'Perdonado' : c.revision === 'cobrado' ? 'Se le cobra al empleado' : 'Descuadre real'}${c.revision_motivo ? `: ${esc(c.revision_motivo)}` : ''} <small>(${esc(c.revision_nombre || '')})</small></dd>` : ''}
+      ${(c.cobros || []).map((b) => `<dt>Cobro</dt><dd>${esc(b.perfil_nombre)} · ${pesos(b.monto)} · ${ESTADO_PAGO[b.pago_estado] || ''}</dd>`).join('')}</dl>
+    ${c.revision ? `<div class="acciones">${(c.cobros || []).some((b) => b.pago_estado !== 'debe') ? '<p class="ayuda">Ya hay un pago de este cobro. Para cambiar la revisión, primero rechaza o deshaz el pago en “Cobros a empleados”.</p>' : '<button type="button" class="btn ghost" data-quitar>Quitar la revisión</button>'}</div>` : `<form class="formulario" novalidate style="margin-top:8px">
       <p class="detalle">¿Fue un error honesto? Si lo perdonas, ya no cuenta como descuadre real en la app.</p>
       <div class="chips">${MOTIVOS_PERDON.map((m) => `<button type="button" class="chip" data-motivo="${esc(m)}">${esc(m)}</button>`).join('')}</div>
       <div class="campo"><label for="cj-mot">Motivo del perdón</label><input id="cj-mot" type="text" maxlength="300" placeholder="Ej. capturó 3,795 en vez de 13,795"></div>
-      <div class="fila-botones"><button type="button" class="btn peligro-suave" data-real>Es descuadre real</button><button type="submit" class="btn">🤝 Perdonar</button></div></form>`}`,
+      <div class="fila-botones"><button type="button" class="btn peligro-suave" data-real>Es descuadre real</button><button type="submit" class="btn">🤝 Perdonar</button></div>
+      ${Number(c.diferencia) < 0 ? '<button type="button" class="btn ghost" data-cobrar style="margin-top:8px">💸 Cobrar al empleado</button>' : ''}</form>`}`,
   { titulo: 'Descuadre de caja' });
   const guardar = (accion, motivo, boton) => conOcupado(boton, async () => {
     let r; try { r = await api.rpc('caja_revisar', { p_caja: c.id, p_accion: accion, p_motivo: motivo }); } catch (e) { r = { ok: false, mensaje: e.message }; }
@@ -38,8 +44,89 @@ export function ventanaCaja(c, alListo) {
     const m = e.target.closest('[data-motivo]'); if (m) { $('#cj-mot', v.el).value = m.dataset.motivo; return; }
     const r = e.target.closest('[data-real]'); if (r) return guardar('real', $('#cj-mot', v.el)?.value || '', r);
     const q = e.target.closest('[data-quitar]'); if (q) return guardar('quitar', '', q);
+    if (e.target.closest('[data-cobrar]')) return ventanaCobrarCaja(c, () => { v.cerrar(); alListo?.(); });
   });
   $('form', v.el)?.addEventListener('submit', (e) => { e.preventDefault(); guardar('perdonado', $('#cj-mot', v.el).value, $('button[type=submit]', v.el)); });
+}
+
+const ESTADO_PAGO = { debe: '<span class="insignia mal">Debe</span>', por_confirmar: '<span class="insignia aviso-i">Pagó · por confirmar</span>', pagado: '<span class="insignia">Pagado</span>' };
+const METODO_PAGO = { efectivo: '💵 Efectivo en caja', transferencia: '🏦 Transferencia', tarjeta: '💳 Tarjeta / ticket en Loyverse', en_mano: '🤝 Recibido por gerencia' };
+
+async function ventanaCobrarCaja(c, alListo) {
+  let personal = [];
+  try { personal = await api.rpc('listar_personal'); } catch { personal = []; }
+  const falta = Math.abs(Number(c.diferencia));
+  const v = ventana(`<form class="formulario" novalidate><p class="detalle" style="margin-top:0">La caja cerró con faltante de <b>${pesos(falta)}</b>. Al empleado le aparece la deuda en su app con el botón “Ya pagué”.</p>
+    <div class="campo"><label for="cc-p">¿A quién se le cobra?</label><select id="cc-p">${(personal || []).map((p) => `<option value="${esc(p.id)}" ${p.id === c.perfil_id ? 'selected' : ''}>${esc(p.nombre_completo)}</option>`).join('')}</select></div>
+    <div class="campo"><label for="cc-m">Monto</label><input id="cc-m" type="number" inputmode="decimal" min="1" step="any" value="${esc(falta)}"></div>
+    <div class="campo"><label for="cc-n">Nota para el empleado <span class="opc">(opcional)</span></label><input id="cc-n" type="text" maxlength="300" placeholder="Ej. faltó al cerrar tu turno"></div>
+    <button class="btn" type="submit">💸 Cobrar</button></form>`, { titulo: 'Cobrar descuadre de caja' });
+  $('form', v.el).addEventListener('submit', (e) => {
+    e.preventDefault();
+    const monto = Number($('#cc-m', v.el).value);
+    if (!(monto > 0)) return aviso('Escribe el monto.', 'error');
+    conOcupado($('button[type=submit]', v.el), async () => {
+      let r; try { r = await api.rpc('caja_cobrar', { p_caja: c.id, p_perfil: $('#cc-p', v.el).value, p_monto: monto, p_motivo: $('#cc-n', v.el).value }); } catch (er) { r = { ok: false, mensaje: er.message }; }
+      if (!r.ok) return aviso({ ya_cobrado: 'Esta caja ya tiene un cobro.', sin_faltante: 'Esta caja no tiene faltante.', perfil_invalido: 'Elige a un empleado.' }[r.error] || r.mensaje || 'No se pudo guardar.', 'error');
+      v.cerrar(); aviso('Listo: el empleado verá la deuda en su app.', 'ok', 5000); alListo?.();
+    });
+  });
+}
+
+// Cobros a empleados (conteos y cajas): quién debe, quién avisó que pagó y quién ya pagó.
+export async function ventanaCobros(alCambio) {
+  const v = ventana('<p class="cargando">Cargando…</p>', { titulo: '💸 Cobros a empleados' });
+  let lista = [];
+  async function pintar() {
+    let r; try { r = await api.rpc('cobros_lista'); } catch (e) { r = { ok: false, mensaje: e.message }; }
+    if (!r.ok) { v.poner(`<p class="detalle">${esc(r.error === 'sin_permiso' ? 'No tienes acceso a esto. Pídeselo al administrador.' : r.mensaje || 'No se pudo cargar.')}</p>`); return; }
+    lista = r.cobros || [];
+    const grupo = (t, arr) => (arr.length ? `<h3 class="sub-titulo">${t} (${arr.length})</h3><div class="lista">${arr.map(fila).join('')}</div>` : '');
+    const deben = lista.filter((b) => b.pago_estado === 'debe');
+    const totalDebe = deben.reduce((s, b) => s + Number(b.monto), 0);
+    v.poner(`<p class="detalle" style="margin-top:0">${deben.length ? `Deben en total <b>${pesos(totalDebe)}</b>.` : 'Nadie debe nada. 👏'} Toca un cobro para ver el comprobante y confirmarlo.</p>
+      ${grupo('Pagó · por confirmar', lista.filter((b) => b.pago_estado === 'por_confirmar'))}${grupo('Deben', deben)}${grupo('Pagados (60 días)', lista.filter((b) => b.pago_estado === 'pagado'))}
+      ${lista.length ? '' : '<p class="todo-bien">✓ No hay cobros.</p>'}`);
+  }
+  const origen = (b) => `${b.origen === 'caja' ? 'Caja' : 'Conteo'} del ${new Date(b.fecha + 'T12:00:00').toLocaleDateString('es-MX', { day: 'numeric', month: 'short' })}`;
+  const fila = (b) => `<button type="button" class="fila" data-cobro-g="${esc(b.id)}"><div class="fila-txt"><b>${esc(b.perfil_nombre)} · ${pesos(b.monto)}</b>
+      <span>${esc(origen(b))}${b.pago_metodo ? ` · ${METODO_PAGO[b.pago_metodo] || ''}` : ''}${b.pago_estado === 'por_confirmar' && (b.coincidencias || []).length ? ' · <b class="ok-txt">entrada en Loyverse encontrada</b>' : ''}</span></div>${ESTADO_PAGO[b.pago_estado] || ''}</button>`;
+  v.el.addEventListener('click', (e) => { const f = e.target.closest('[data-cobro-g]'); if (f) verCobroG(lista.find((x) => x.id === f.dataset.cobroG)); });
+  function verCobroG(b) {
+    if (!b) return;
+    const co = b.coincidencias || [];
+    const w = ventana(`<dl class="datos"><dt>Empleado</dt><dd>${esc(b.perfil_nombre)}</dd><dt>Monto</dt><dd><b>${pesos(b.monto)}</b></dd><dt>Origen</dt><dd>${esc(origen(b))}${b.nota ? ` · ${esc(b.nota)}` : ''}</dd>
+        <dt>Estado</dt><dd>${ESTADO_PAGO[b.pago_estado] || ''}</dd>
+        ${b.pago_metodo ? `<dt>Cómo pagó</dt><dd>${METODO_PAGO[b.pago_metodo] || ''}${b.pagado_en ? ` · ${esc(fechaHora(b.pagado_en))}` : ''}</dd>` : ''}
+        ${b.pago_ref ? `<dt>Ticket</dt><dd>${esc(b.pago_ref)}</dd>` : ''}${b.pago_nota ? `<dt>Nota</dt><dd>${esc(b.pago_nota)}</dd>` : ''}
+        ${b.pago_confirmado_en ? `<dt>Confirmado</dt><dd>${esc(b.pago_confirmado_nombre || '')} · ${esc(fechaHora(b.pago_confirmado_en))}</dd>` : ''}
+        ${b.pago_rechazo ? `<dt>Pago rechazado</dt><dd>${esc(b.pago_rechazo)}</dd>` : ''}</dl>
+      <div id="cg-adj"></div>
+      ${b.pago_estado === 'por_confirmar' && b.pago_metodo === 'efectivo' ? (co.length ? `<p class="nota-info">✅ En Loyverse hay ${co.length === 1 ? 'una entrada de efectivo' : `${co.length} entradas de efectivo`} de ${pesos(b.monto)}: ${co.map((m) => `${esc(fechaHora(m.fecha))}${m.comentario ? ` “${esc(m.comentario)}”` : ''}`).join(' · ')}</p>`
+        : '<p class="nota-aviso">No encontré en Loyverse una entrada de efectivo de ese monto (solo se ven las cajas ya cerradas). Revisa antes de confirmar.</p>') : ''}
+      <div class="acciones">
+        ${b.pago_estado === 'por_confirmar' ? '<button type="button" class="btn" data-ok>✅ Confirmar pago</button><button type="button" class="btn ghost" data-no>No llegó</button>' : ''}
+        ${b.pago_estado === 'debe' ? '<button type="button" class="btn ghost" data-mano>🤝 Ya me pagó (en mano)</button>' : ''}
+        ${b.pago_estado === 'pagado' ? '<button type="button" class="btn ghost" data-deshacer>Deshacer confirmación</button>' : ''}</div>`, { titulo: 'Cobro' });
+    if (b.pago_foto) import('../pend.js').then((m) => { $('#cg-adj', w.el).innerHTML = m.adjuntosHtml(b.pago_foto); m.hidratarFotosPend(w.el); });
+    const accion = (acc, motivo, boton) => conOcupado(boton, async () => {
+      let r; try { r = await api.rpc('cobro_confirmar', { p_id: b.id, p_accion: acc, p_motivo: motivo }); } catch (er) { r = { ok: false, mensaje: er.message }; }
+      if (!r.ok) return aviso(r.error === 'falta_motivo' ? 'Escribe qué pasó.' : r.mensaje || 'No se pudo guardar.', 'error');
+      w.cerrar(); aviso(acc === 'confirmar' ? 'Pago confirmado.' : acc === 'rechazar' ? 'Listo: al empleado le vuelve a salir que debe.' : 'Confirmación deshecha.', 'ok'); pintar(); alCambio?.();
+    });
+    w.el.addEventListener('click', (e) => {
+      const t = e.target.closest('button'); if (!t) return;
+      if (t.matches('[data-ok]')) return accion('confirmar', null, t);
+      if (t.matches('[data-deshacer]')) return accion('deshacer', null, t);
+      if (t.matches('[data-mano]')) return accion('confirmar', 'Recibido en mano por gerencia', t);
+      if (t.matches('[data-no]')) {
+        const z = ventana(`<form class="formulario" novalidate><div class="campo"><label for="cg-m">¿Qué pasó? (lo ve el empleado)</label><input id="cg-m" type="text" maxlength="300" placeholder="Ej. no aparece la entrada de efectivo en Loyverse"></div>
+          <button class="btn" type="submit">Marcar que no llegó</button></form>`, { titulo: 'El pago no llegó' });
+        $('form', z.el).addEventListener('submit', (ev) => { ev.preventDefault(); const m = $('#cg-m', z.el).value.trim(); if (m.length < 3) return aviso('Escribe qué pasó.', 'error'); z.cerrar(); accion('rechazar', m, t); });
+      }
+    });
+  }
+  pintar();
 }
 
 export async function ventanaCajas(alCambio) {

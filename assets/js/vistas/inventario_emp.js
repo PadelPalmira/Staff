@@ -2,12 +2,17 @@
 import * as api from '../api.js';
 import { estiloCategoria, miniArticulo, hidratarFotosArticulos } from '../categorias.js';
 import { esc, $, $$, aviso, ventana, confirmar, conOcupado, fechaCorta, fechaHora, comprimirEvidencia, cantidad, pesos, plural } from '../ui.js';
+import { campoAdjuntos } from '../pend.js';
 
 const ERR = {
   falta_ticket: 'Toma la foto del ticket o sube la imagen / PDF.', falta_motivo_dano: 'Di qué le pasó a lo que llegó mal.', falta_foto_dano: 'Toma la foto de lo que llegó mal.', sin_articulos: 'Agrega al menos un artículo.', cantidad_invalida: 'Revisa las cantidades (deben ser mayores a 0).',
   articulo_invalido: 'Hay un artículo que no se reconoce.', conteo_no_disponible: 'Este conteo ya no está disponible (lo cerró o reasignó gerencia).', en_curso: 'Alguien más ya está haciendo el conteo.',
   sin_conexion: 'No hay internet. Revisa la conexión e intenta de nuevo.',
+  falta_foto: 'Toma la foto o sube la captura del comprobante.', falta_ref: 'Escribe el número de ticket o toma la foto del ticket.',
+  ya_pagado: 'Este pago ya se avisó.', cerrado: 'Ya se cerró el tiempo para explicar este conteo.',
 };
+const METODO = { efectivo: '💵 Efectivo en caja', transferencia: '🏦 Transferencia', tarjeta: '💳 Tarjeta / ticket en Loyverse', en_mano: '🤝 Lo recibió gerencia' };
+const origenCobro = (b) => (b.origen === 'caja' ? `Descuadre de caja del ${fechaCorta(b.fecha_caja + 'T12:00:00')}` : `Conteo del ${fechaCorta(b.fecha_conteo + 'T12:00:00')}`);
 const msg = (r) => ERR[r?.error] || r?.mensaje || 'No se pudo completar. Intenta de nuevo.';
 const ESTADO = { enviado: ['Por verificar', 'gris'], verificado: ['Verificado', ''], cargado: ['Cargado', ''], cancelado: ['Cancelado', 'mal'] };
 const uuid = () => (crypto.randomUUID ? crypto.randomUUID() : 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => { const r = Math.random() * 16 | 0; return (c === 'x' ? r : (r & 3 | 8)).toString(16); }));
@@ -24,10 +29,10 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
   raiz.innerHTML = '<p class="cargando">Cargando inventario…</p>';
 
   async function cargar() {
-    const r = await llamar('inv_emp_estado');
+    const [r, d] = await Promise.all([llamar('inv_emp_estado'), llamar('inv_conteo_diferencias').catch(() => null)]);
     if (muerto) return;
     if (!r.ok) { if (r.error !== 'sesion_invalida') raiz.innerHTML = `<div class="tarjeta vacio"><p>${esc(msg(r))}</p><button class="btn ghost" data-recargar>Volver a intentar</button></div>`; return; }
-    est = r; alCambio?.(r);
+    est = r; est.difs = d?.ok ? d.conteos : []; alCambio?.(r);
     if (vista === 'inicio') pintarInicio();
   }
 
@@ -36,7 +41,8 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
   // ---------- inicio ----------
   function pintarInicio() {
     vista = 'inicio';
-    const c = est.conteo, sinVer = est.cobros.filter((b) => !b.visto_en);
+    const c = est.conteo;
+    const debe = est.cobros.filter((b) => b.pago_estado === 'debe'), porConf = est.cobros.filter((b) => b.pago_estado === 'por_confirmar');
     let h = '<h2 class="saludo">Inventario</h2>';
     if (c) {
       const hechos = Object.keys(c.items).length, total = listaConteo(c).length;
@@ -51,10 +57,26 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
         <p class="detalle">Puedes hacer un conteo cuando quieras (por ejemplo al recibir o entregar tu turno). Se compara con Loyverse y gerencia lo revisa.</p>
         <button type="button" class="btn grande" data-contar>📋 Hacer conteo</button></section>`;
     }
-    for (const b of sinVer) {
-      h += `<section class="tarjeta tarjeta-avisos"><h2>Descuadre del conteo del ${esc(fechaCorta(b.fecha_conteo + 'T12:00:00'))}</h2>
-        <p class="detalle">Gerencia te asignó <b>${esc(pesos(b.monto))}</b>${b.nota ? ` · ${esc(b.nota)}` : ''}.</p>
-        <button type="button" class="btn ghost" data-cobro="${esc(b.id)}">Ver detalle</button></section>`;
+    for (const b of debe) {
+      h += `<section class="tarjeta tarjeta-avisos cobro-pend"><h2>💸 Debes ${esc(pesos(b.monto))}</h2>
+        <p class="detalle">${esc(origenCobro(b))}${b.nota ? ` · ${esc(b.nota)}` : ''}</p>
+        ${b.pago_rechazo ? `<p class="nota-mal">Gerencia no encontró tu pago: “${esc(b.pago_rechazo)}”. Vuelve a avisar cuando pagues.</p>` : ''}
+        <div class="fila-botones" style="margin:0"><button type="button" class="btn" data-pagar="${esc(b.id)}">✅ Ya pagué</button>
+        <button type="button" class="btn ghost" data-cobro="${esc(b.id)}">Ver detalle</button></div></section>`;
+    }
+    for (const b of porConf) {
+      h += `<section class="tarjeta cobro-espera"><h2>⏳ Pagaste ${esc(pesos(b.monto))}</h2>
+        <p class="detalle">${esc(origenCobro(b))} · ${esc(METODO[b.pago_metodo] || '')}. Gerencia lo está confirmando.</p></section>`;
+    }
+    for (const d of est.difs || []) {
+      const items = d.items.filter((i) => !i.es_insumo || i.diferencia < 0);
+      if (!items.length) continue;
+      const explicados = items.filter((i) => i.mi_explicacion).length;
+      h += `<section class="tarjeta difs-conteo"><h2>🧮 Diferencias del conteo del ${esc(fechaCorta(d.fecha + 'T12:00:00'))}</h2>
+        <p class="detalle">${d.puede_explicar ? `Contó ${esc(d.contado_por_nombre || '—')}. Si sabes por qué falta o sobra algo (se contó mal, se rompió, se regaló…), explícalo. Tienes hasta el ${esc(fechaHora(d.explicar_hasta))}`
+          : d.estado === 'revisado' ? 'Gerencia ya revisó este conteo.' : 'Ya se cerró el tiempo para explicar. Gerencia lo está revisando.'}</p>
+        <button type="button" class="btn ${d.puede_explicar ? '' : 'ghost'}" data-difs="${esc(d.id)}">${d.puede_explicar ? `Ver y explicar (${items.length})` : 'Ver diferencias'}</button>
+        ${d.puede_explicar && explicados ? `<p class="ayuda">Explicaste ${explicados} de ${items.length}.</p>` : ''}</section>`;
     }
     h += `<button type="button" class="btn grande" data-recibir>＋ Recibir pedido</button>
       <p class="ayuda">Cuando llegue un proveedor: captura lo que llegó y toma la foto del ticket. Gerencia lo revisa después.</p>`;
@@ -73,24 +95,105 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     if (est.solicitudes?.length) h += `<div class="lista">${est.solicitudes.map((x) => { const [t, cl] = SOL[x.estado] || [x.estado, 'gris'];
       return `<div class="fila inv"><span class="pend-ico">${x.tipo === 'alta' ? '➕' : '➖'}</span><div class="fila-txt"><b>${esc(x.nombre)}</b><span>${esc(fechaHora(x.creado_en))}${x.respuesta ? ` · Gerencia: ${esc(x.respuesta)}` : ''}</span></div>
         <span class="insignia ${cl}">${esc(t)}</span></div>`; }).join('')}</div>`;
-    const vistos = est.cobros.filter((b) => b.visto_en);
-    if (vistos.length) h += `<h3 class="sub-titulo">Descuadres anteriores</h3><div class="lista">${vistos.map((b) => `<button type="button" class="fila" data-cobro="${esc(b.id)}"><div class="fila-txt"><b>Conteo del ${esc(fechaCorta(b.fecha_conteo + 'T12:00:00'))}</b><span>${esc(pesos(b.monto))}</span></div></button>`).join('')}</div>`;
+    const pagados = est.cobros.filter((b) => b.pago_estado === 'pagado');
+    if (pagados.length) h += `<h3 class="sub-titulo">Cobros pagados</h3><div class="lista">${pagados.map((b) => `<button type="button" class="fila" data-cobro="${esc(b.id)}"><div class="fila-txt"><b>${esc(origenCobro(b))}</b><span>${esc(pesos(b.monto))} · ${esc(METODO[b.pago_metodo] || '')}</span></div><span class="insignia">Pagado</span></button>`).join('')}</div>`;
     raiz.innerHTML = h;
   }
 
   function verCobro(id) {
     const b = est.cobros.find((x) => x.id === id);
     if (!b) return;
-    const falt = b.detalle.filter((d) => d.diferencia < 0), sobr = b.detalle.filter((d) => d.diferencia > 0);
+    const det = b.detalle || [];
+    const falt = det.filter((d) => d.diferencia < 0), sobr = det.filter((d) => d.diferencia > 0);
     const fila = (d) => `<li><span>${esc(d.nombre)}</span><b>${d.diferencia > 0 ? '+' : ''}${esc(cantidad(d.diferencia))}</b><i>${esc(pesos(Math.abs(d.diferencia) * (d.precio || 0)))}</i></li>`;
-    const v = ventana(`<p class="detalle" style="margin-top:0">En el conteo del ${esc(fechaCorta(b.fecha_conteo + 'T12:00:00'))} se encontraron estas diferencias contra lo que dice el sistema (a precio de venta).</p>
+    const v = ventana(`${b.origen === 'caja' ? `<p class="detalle" style="margin-top:0">La caja del ${esc(fechaCorta(b.fecha_caja + 'T12:00:00'))} cerró con un faltante de <b>${esc(pesos(Math.abs(b.caja_diferencia || 0)))}</b>.</p>`
+      : `<p class="detalle" style="margin-top:0">En el conteo del ${esc(fechaCorta(b.fecha_conteo + 'T12:00:00'))} se encontraron estas diferencias contra lo que dice el sistema (a precio de venta).</p>`}
       ${falt.length ? `<h3 class="sub-titulo">Faltó</h3><ul class="lista-dif">${falt.map(fila).join('')}</ul>` : ''}
       ${sobr.length ? `<h3 class="sub-titulo">Sobró (se resta)</h3><ul class="lista-dif">${sobr.map(fila).join('')}</ul>` : ''}
       <p class="total-dif">Te toca: <b>${esc(pesos(b.monto))}</b></p>${b.nota ? `<p class="detalle">Nota de gerencia: ${esc(b.nota)}</p>` : ''}
-      <div class="acciones">${b.visto_en ? '<button type="button" class="btn ghost" data-cerrar>Cerrar</button>' : '<button type="button" class="btn" data-enterado>Enterado</button>'}</div>`, { titulo: 'Descuadre de inventario' });
+      ${b.pago_estado === 'pagado' ? `<p class="nota-info">✅ Pagado · ${esc(METODO[b.pago_metodo] || '')}</p>` : b.pago_estado === 'por_confirmar' ? '<p class="nota-info">⏳ Avisaste que ya pagaste. Gerencia lo está confirmando.</p>' : ''}
+      <div class="acciones">${b.pago_estado === 'debe' ? '<button type="button" class="btn" data-pagar-v>✅ Ya pagué</button>' : ''}
+        ${b.visto_en ? '<button type="button" class="btn ghost" data-cerrar>Cerrar</button>' : '<button type="button" class="btn ghost" data-enterado>Enterado</button>'}</div>`, { titulo: b.origen === 'caja' ? 'Descuadre de caja' : 'Descuadre de inventario' });
     $('[data-enterado]', v.el)?.addEventListener('click', (e) => conOcupado(e.currentTarget, async () => {
       await llamar('inv_cobro_visto', { p_id: b.id }); v.cerrar(); cargar();
     }));
+    $('[data-pagar-v]', v.el)?.addEventListener('click', () => { v.cerrar(); ventanaPago(b.id); });
+    if (!b.visto_en) llamar('inv_cobro_visto', { p_id: b.id }).then(() => { b.visto_en = new Date().toISOString(); }).catch(() => {});
+  }
+
+  function ventanaPago(id) {
+    const b = est.cobros.find((x) => x.id === id);
+    if (!b) return;
+    const AYUDA = {
+      efectivo: 'Mete el dinero a la caja y regístralo en Loyverse como <b>Entrada de efectivo</b> (Turno › Entradas/salidas de efectivo) con el comentario “Pago de tu nombre”. Gerencia lo revisa en Loyverse.',
+      transferencia: 'Transfiere a la cuenta del club y <b>toma foto o sube la captura del comprobante</b>.',
+      tarjeta: 'Cobra en Loyverse un ticket por el monto y <b>escribe el número de ticket</b> o toma la foto del ticket.',
+    };
+    const v = ventana(`<form class="formulario" novalidate><p class="detalle" style="margin-top:0">${esc(origenCobro(b))} · <b>${esc(pesos(b.monto))}</b></p>
+      <fieldset class="campo"><legend>¿Cómo pagaste?</legend><div class="opciones-pago">
+        ${['efectivo', 'transferencia', 'tarjeta'].map((m, i) => `<label class="opcion-pago"><input type="radio" name="pg-m" value="${m}" ${i === 0 ? 'checked' : ''}><span>${METODO[m]}</span></label>`).join('')}</div></fieldset>
+      <p class="nota-info" id="pg-ayuda">${AYUDA.efectivo}</p>
+      <div class="campo" id="pg-ref-c" hidden><label for="pg-ref">Número de ticket en Loyverse</label><input id="pg-ref" type="text" maxlength="40" placeholder="Ej. 2-1045"></div>
+      <div class="campo"><label>Comprobante <span class="opc" id="pg-opc">(opcional)</span></label><div id="pg-adj"></div></div>
+      <div class="campo"><label for="pg-nota">Nota <span class="opc">(opcional)</span></label><input id="pg-nota" type="text" maxlength="200"></div>
+      <button class="btn grande" type="submit">Avisar que ya pagué</button></form>`, { titulo: '✅ Ya pagué' });
+    const adj = campoAdjuntos($('#pg-adj', v.el), 'Tomar foto');
+    const metodo = () => $('input[name=pg-m]:checked', v.el).value;
+    v.el.addEventListener('change', (e) => {
+      if (e.target.name !== 'pg-m') return;
+      const m = metodo();
+      $('#pg-ayuda', v.el).innerHTML = AYUDA[m];
+      $('#pg-ref-c', v.el).hidden = m !== 'tarjeta';
+      $('#pg-opc', v.el).textContent = m === 'transferencia' ? '(obligatorio)' : m === 'tarjeta' ? '(o el número de ticket)' : '(opcional)';
+    });
+    $('form', v.el).addEventListener('submit', (ev) => {
+      ev.preventDefault();
+      const m = metodo(), ref = m === 'tarjeta' ? $('#pg-ref', v.el).value.trim() : '';
+      if (m === 'transferencia' && !adj.blob()) return aviso(ERR.falta_foto, 'error');
+      if (m === 'tarjeta' && !ref && !adj.blob()) return aviso(ERR.falta_ref, 'error');
+      conOcupado($('button[type=submit]', v.el), async () => {
+        let foto = null;
+        try { foto = await adj.subir(b.id, Date.now().toString(36), 'cobros'); } catch { return aviso('No se pudo subir el comprobante. Revisa el internet e intenta de nuevo.', 'error'); }
+        const r = await llamar('inv_cobro_pagar', { p_id: b.id, p_metodo: m, p_foto: foto, p_ref: ref || null, p_nota: $('#pg-nota', v.el).value });
+        if (!r.ok) return aviso(msg(r), 'error');
+        v.cerrar(); aviso('Listo. Gerencia va a confirmar tu pago.', 'ok', 5000); cargar();
+      });
+    });
+  }
+
+  function verDiferencias(id) {
+    const d = (est.difs || []).find((x) => x.id === id);
+    if (!d) return;
+    const items = d.items.filter((i) => !i.es_insumo || i.diferencia < 0);
+    const fila = (i) => {
+      const dinero = i.precio != null ? ` · ${pesos(Math.abs(i.diferencia) * i.precio)}` : '';
+      const dec = d.estado === 'revisado' ? (i.diferencia < 0 ? (i.no_cobrar ? '<span class="insignia">Perdonado</span>' : '<span class="insignia mal">Se cobra</span>') : '') : '';
+      return `<div class="fila inv dif-emp" data-art="${esc(i.articulo_id)}"><div class="fila-txt"><b>${esc(i.nombre)}</b>
+        <span class="${i.diferencia < 0 ? 'mal-txt' : 'ok-txt'}">${i.diferencia < 0 ? 'Faltan' : 'Sobran'} ${esc(cantidad(Math.abs(i.diferencia)))} ${esc(unidadTxt(i, Math.abs(i.diferencia)))}${esc(dinero)} · contaron ${esc(cantidad(i.contado))}</span>
+        ${i.mi_explicacion ? `<span>💬 Tú: ${esc(i.mi_explicacion)}</span>` : ''}
+        ${i.explicaciones.map((x) => `<span>💬 ${esc(x.nombre)}: ${esc(x.texto)}</span>`).join('')}</div>
+        ${d.puede_explicar ? `<button type="button" class="btn ghost chico" data-explicar>${i.mi_explicacion ? 'Cambiar' : 'Explicar'}</button>` : dec}</div>`;
+    };
+    const v = ventana(`<p class="detalle" style="margin-top:0">Conteo del ${esc(fechaCorta(d.fecha + 'T12:00:00'))} contra lo que dice Loyverse. ${d.puede_explicar ? 'Gerencia decide qué se cobra y qué se perdona.' : ''}</p>
+      <div class="lista">${items.map(fila).join('')}</div>`, { titulo: '🧮 Diferencias del conteo' });
+    v.el.addEventListener('click', (e) => {
+      const bt = e.target.closest('[data-explicar]'); if (!bt) return;
+      const i = items.find((x) => x.articulo_id === bt.closest('[data-art]').dataset.art);
+      const w = ventana(`<form class="formulario" novalidate><p class="detalle" style="margin-top:0"><b>${esc(i.nombre)}</b>: ${i.diferencia < 0 ? 'faltan' : 'sobran'} ${esc(cantidad(Math.abs(i.diferencia)))}</p>
+        <div class="campo"><label for="ex-t">¿Qué pasó?</label><textarea id="ex-t" rows="3" maxlength="300" placeholder="Ej. se contó mal, había más en la bodega / se rompió una / se le dio a un cliente">${esc(i.mi_explicacion || '')}</textarea></div>
+        <div class="chips-rapidos">${['Se contó mal', 'Se rompió / se echó a perder', 'Estaba en un ticket abierto', 'Cortesía para un cliente', 'No sé qué pasó'].map((t) => `<button type="button" class="chip" data-t="${esc(t)}">${esc(t)}</button>`).join('')}</div>
+        <button class="btn" type="submit">Guardar</button></form>`, { titulo: 'Explicar diferencia' });
+      w.el.addEventListener('click', (ev) => { const c = ev.target.closest('[data-t]'); if (c) { const t = $('#ex-t', w.el); t.value = t.value ? `${t.value.trim()}. ${c.dataset.t}` : c.dataset.t; t.focus(); } });
+      $('form', w.el).addEventListener('submit', (ev) => {
+        ev.preventDefault();
+        conOcupado($('button[type=submit]', w.el), async () => {
+          const r = await llamar('inv_conteo_explicar', { p_conteo: d.id, p_articulo: i.articulo_id, p_texto: $('#ex-t', w.el).value });
+          if (!r.ok) return aviso(msg(r), 'error');
+          w.cerrar(); v.cerrar(); aviso('Guardado. Gerencia lo va a ver al revisar el conteo.', 'ok', 4000);
+          await cargar(); verDiferencias(d.id);
+        });
+      });
+    });
   }
 
   // ---------- recibir pedido ----------
@@ -279,8 +382,12 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     await cargar();
     if (!est?.conteo) return aviso('No se pudo abrir el conteo. Intenta de nuevo.', 'error');
     if (Object.keys(est.conteo.items).length) return pintarConteo();
-    const v = ventana(`${AVISO_COBRO}${REGLAS_CONTEO}
-      <div class="acciones"><button type="button" class="btn grande" data-ok>Entendido, empezar a contar</button></div>`, { titulo: 'Antes de empezar' });
+    const v = ventana(`<div class="nota-mal aviso-tickets">🧾 <b>Antes de contar, cobra o cierra TODOS los tickets abiertos en Loyverse.</b><br>
+        Lo que está en un ticket abierto todavía cuenta como existencia en Loyverse, así que <b>va a salir como faltante</b> en el conteo y se te puede cobrar.</div>
+      ${AVISO_COBRO}${REGLAS_CONTEO}
+      <label class="interruptor confirmar-conteo"><input type="checkbox" id="tk-ok"><span>Ya revisé: <b>no hay tickets abiertos</b> en Loyverse</span></label>
+      <div class="acciones"><button type="button" class="btn grande" data-ok disabled>Empezar a contar</button></div>`, { titulo: 'Antes de empezar' });
+    $('#tk-ok', v.el).addEventListener('change', (ev) => { $('[data-ok]', v.el).disabled = !ev.target.checked; });
     $('[data-ok]', v.el).addEventListener('click', () => { v.cerrar(); pintarConteo(); });
   }
   function pintarConteo() {
@@ -364,7 +471,7 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
       $('[data-enviar-ya]', v.el).addEventListener('click', (ev) => conOcupado(ev.currentTarget, async () => {
         const r = await llamar('inv_conteo_enviar', { p_conteo: c.id, p_forzar: true });
         if (!r.ok) return aviso(msg(r), 'error');
-        v.cerrar(); aviso('Conteo enviado. Gerencia lo revisa. ¡Gracias!', 'ok', 5000);
+        v.cerrar(); aviso('Conteo enviado. En unos minutos aparecen aquí las diferencias para que puedan explicarlas. ¡Gracias!', 'ok', 7000);
         vista = 'inicio'; cargar();
       }));
     });
@@ -433,7 +540,11 @@ export function montarInventarioEmp(cont, { llamar, alCambio }) {
     const bc = e.target.closest('[data-contar]');
     if (bc) return conOcupado(bc, iniciarConteo);
     const cb = e.target.closest('[data-cobro]');
-    if (cb) verCobro(cb.dataset.cobro);
+    if (cb) return verCobro(cb.dataset.cobro);
+    const pg = e.target.closest('[data-pagar]');
+    if (pg) return ventanaPago(pg.dataset.pagar);
+    const df = e.target.closest('[data-difs]');
+    if (df) return verDiferencias(df.dataset.difs);
   });
 
   cargar();

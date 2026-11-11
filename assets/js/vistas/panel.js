@@ -1,6 +1,6 @@
 // Panel de administración y gerencia: barra superior, pestañas e Inicio.
 import * as api from '../api.js';
-import { ventanaCajas, ventanaMover } from './revisiones.js';
+import { ventanaCajas, ventanaMover, ventanaCobros } from './revisiones.js';
 import { APP_VERSION } from '../config.js';
 import { esc, $, $$, ROL, avatar, hidratarAvatares, aviso, conOcupado, primerNombre, puede } from '../ui.js';
 import { montarTurnos, pintarEnVivo, verTurno, pintarAvisos, contarAvisos } from './turnos.js';
@@ -120,7 +120,8 @@ export function montarPanel(raiz, ctx, yo) {
   async function montarInicio(el) {
     el.innerHTML = `<h2 class="saludo">Hola, ${esc(primerNombre(yo.nombre_completo))}</h2>
       ${p('tablero') ? `<button type="button" class="tarjeta boton-tablero" data-ir-tablero><span aria-hidden="true">📊</span><div><b>${esAdmin ? 'Tablero del dueño' : 'Tablero del club'}</b><span class="sub">Ventas, cumplimiento, descuadres y resumen del día, semana o mes</span></div><i aria-hidden="true">›</i></button>` : ''}
-      ${p('caja') ? '<button type="button" class="tarjeta boton-tablero boton-caja" data-ir-cajas><span aria-hidden="true">💵</span><div><b>Descuadres de caja</b><span class="sub">Revisar, perdonar o confirmar cada descuadre</span></div><i aria-hidden="true">›</i></button>' : ''}
+      ${p('caja') ? '<button type="button" class="tarjeta boton-tablero boton-caja" data-ir-cajas><span aria-hidden="true">💵</span><div><b>Descuadres de caja</b><span class="sub">Revisar, perdonar, confirmar o cobrar cada descuadre</span></div><i aria-hidden="true">›</i></button>' : ''}
+      ${p('caja') || p('conteos') ? '<button type="button" class="tarjeta boton-tablero boton-cobros" data-ir-cobros><span aria-hidden="true">💸</span><div><b>Cobros a empleados</b><span class="sub">Quién debe, quién ya pagó y comprobantes</span></div><i aria-hidden="true">›</i></button>' : ''}
       <section class="tarjeta" id="por-hacer"><h2>✅ Por hacer</h2><div class="por-hacer"><p class="cargando">Revisando…</p></div></section>
       ${esAdmin ? '<section class="tarjeta tarjeta-solicitud" id="tarjeta-solicitudes" hidden></section>' : ''}
       <section class="tarjeta tarjeta-avisos" id="tarjeta-avisos" hidden></section>
@@ -143,10 +144,12 @@ export function montarPanel(raiz, ctx, yo) {
     tPend.addEventListener('click', (e) => { if (e.target.closest('[data-ir-pend]')) ir('pendientes'); });
     $('[data-ir-tablero]', el)?.addEventListener('click', () => ir('mas', { vista: 'tablero' }));
     $('[data-ir-cajas]', el)?.addEventListener('click', () => ventanaCajas(pintarHacer));
+    $('[data-ir-cobros]', el)?.addEventListener('click', () => ventanaCobros(pintarHacer));
     // Por hacer: todo lo que espera una acción de gerencia/admin, con un toque para ir directo
     const tHacer = $('#por-hacer .por-hacer', el);
     const IR = {
       cajas_revisar: ['ventana', 'cajas', '💵', (n) => `${n} descuadre${n === 1 ? '' : 's'} de caja por revisar`, 'Perdónalo si fue un error honesto o confírmalo.', 'mal'],
+      cobros_confirmar: ['ventana', 'cobros', '💸', (n) => `${n} pago${n === 1 ? '' : 's'} de empleados por confirmar`, 'Revisa el comprobante o la entrada de efectivo en Loyverse.'],
       mover_tareas: ['ventana', 'mover', '📅', (n) => `${n} tarea${n === 1 ? '' : 's'} que piden mover de día`, 'Apruébalas o recházalas.'],
       pedidos_verificar: ['inventario', 'pedidos', '📦', (n) => `${n} pedido${n === 1 ? '' : 's'} por verificar`, 'Compáralo con la foto del ticket; al verificarlo se suma solo en Loyverse.'],
       lv_aplicar: ['inventario', 'pedidos', '⬆️', (n) => `${n} cambio${n === 1 ? '' : 's'} por aplicar en Loyverse`, 'No se pudieron subir o falta tocar “Aplicar”.', 'mal'],
@@ -175,7 +178,7 @@ export function montarPanel(raiz, ctx, yo) {
     tHacer.addEventListener('click', (e) => {
       const b = e.target.closest('[data-hacer]'); if (!b) return;
       const [tab, sub] = IR[b.dataset.hacer];
-      if (tab === 'ventana') return sub === 'cajas' ? ventanaCajas(pintarHacer) : ventanaMover(pintarHacer);
+      if (tab === 'ventana') return sub === 'cajas' ? ventanaCajas(pintarHacer) : sub === 'cobros' ? ventanaCobros(pintarHacer) : ventanaMover(pintarHacer);
       if (tab === 'inventario') api.guardarLocal('ppstaff-inv-seg', sub);
       if (tab === 'pendientes') api.guardarLocal('ppstaff-pend-vista', sub);
       if (tab === 'turnos') api.guardarLocal('ppstaff-turnos-vista', sub);
