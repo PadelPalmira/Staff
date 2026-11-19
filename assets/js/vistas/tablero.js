@@ -3,6 +3,8 @@ import * as api from '../api.js';
 import { esc, $, $$, pesos, horaCorta } from '../ui.js';
 import { ventanaCaja, insigniaRevision } from './revisiones.js';
 import { ventana } from '../ui.js';
+import { ICONO } from '../iconos.js';
+import { animarTablero } from '../animar.js';
 
 const TZ = 'America/Mexico_City';
 const LLAVE = 'ppstaff-tablero-modo';
@@ -71,6 +73,7 @@ export function montarTablero(el) {
     }
     ultimo = d;
     c.innerHTML = pintar(d, r);
+    animarTablero(c);
   }
   cargar();
 }
@@ -101,7 +104,7 @@ function pintar(d, r) {
   const aj = Object.fromEntries((d.ajustes || []).map((x) => [x.grupo, x]));
   const pend = d.pendientes || {};
 
-  let h = r.unidad === 'mes' ? `<button type="button" class="tarjeta boton-tablero boton-resumen" data-resumen-mes="${esc(r.desde)}"><span aria-hidden="true">📈</span><div><b>Resumen del mes</b><span class="sub">Lo mejor, qué mejorar, qué promover y lo que más se movió</span></div><i aria-hidden="true">›</i></button>` : '';
+  let h = r.unidad === 'mes' ? `<button type="button" class="tarjeta boton-tablero boton-resumen" data-resumen-mes="${esc(r.desde)}"><span aria-hidden="true">${ICONO.resumen}</span><div><b>Resumen del mes</b><span class="sub">Lo mejor, qué mejorar, qué promover y lo que más se movió</span></div><i aria-hidden="true">›</i></button>` : '';
   h += `<section class="tarjeta">
     <div class="kpi-grande"><span>Ventas netas (Loyverse)</span><b>${pesos(netas)}</b>
       ${cambio == null ? '' : `<i class="${cambio >= 0 ? 'ok-txt' : 'mal-txt'}">${cambio >= 0 ? '▲' : '▼'} ${Math.abs(cambio)}% vs. ${r.unidad === 'dia' ? 'el día anterior' : d.dias_comparados && d.dias_comparados < d.dias_periodo ? `${d.dias_comparados === 1 ? 'el mismo día' : `los mismos ${d.dias_comparados} días`} ${unidadTxt[1]} anterior` : `${unidadTxt[0]} anterior`} (${pesos(previas)})</i>`}</div>

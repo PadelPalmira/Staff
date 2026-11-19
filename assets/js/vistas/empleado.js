@@ -5,6 +5,7 @@ import { montarInventarioEmp } from './inventario_emp.js';
 import { montarPendientesEmp } from './pendientes_emp.js';
 import { encolar, enviarCola, pendientesDe, alCambiarCola } from '../cola.js';
 import { esc, $, $$, avatar, hidratarAvatares, aviso, ventana, confirmar, conOcupado, primerNombre, horaCorta, comprimirEvidencia, duracionTexto, ROL, mostrarError, quitarError, pesos } from '../ui.js';
+import { ICONO } from '../iconos.js';
 
 const TZ = 'America/Mexico_City';
 const ERR = {
@@ -59,10 +60,10 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     <div class="banda-offline" data-offline hidden></div>
     <main class="contenido" id="emp-cont"><p class="cargando">Cargando tu turno…</p></main>
     <nav class="tabs" aria-label="Secciones">
-      <button type="button" data-tab="inicio" aria-current="true"><span aria-hidden="true">⌂</span>Inicio</button>
-      <button type="button" data-tab="tareas" aria-current="false"><span aria-hidden="true">✓</span>Tareas<i class="punto-aviso" data-badge hidden></i></button>
-      <button type="button" data-tab="pendientes" aria-current="false"><span aria-hidden="true">📌</span>Pendientes<i class="punto-aviso amarillo" data-badge-pend hidden></i></button>
-      <button type="button" data-tab="inventario" aria-current="false"><span aria-hidden="true">▤</span>Inventario<i class="punto-aviso amarillo" data-badge-inv hidden></i></button>
+      <button type="button" data-tab="inicio" aria-current="true"><span aria-hidden="true">${ICONO.inicio}</span>Inicio</button>
+      <button type="button" data-tab="tareas" aria-current="false"><span aria-hidden="true">${ICONO.tareas}</span>Tareas<i class="punto-aviso" data-badge hidden></i></button>
+      <button type="button" data-tab="pendientes" aria-current="false"><span aria-hidden="true">${ICONO.pendientes}</span>Pendientes<i class="punto-aviso amarillo" data-badge-pend hidden></i></button>
+      <button type="button" data-tab="inventario" aria-current="false"><span aria-hidden="true">${ICONO.inventario}</span>Inventario<i class="punto-aviso amarillo" data-badge-inv hidden></i></button>
     </nav></div>`;
   hidratarAvatares(raiz);
   $('[data-salir]', raiz).addEventListener('click', salir);
@@ -495,7 +496,10 @@ export function montarEmpleado(raiz, { token, perfil, porAdmin, alSalir, alVolve
     const t = est.mio;
     if (!t) return `<h2 class="saludo">Tareas</h2><div class="tarjeta vacio"><p><b>Todavía no abres tu turno.</b></p><p>Cuando comiences tu turno, aquí aparecen tus tareas.</p>
       <button type="button" class="btn" data-ir-inicio>Ir a Inicio</button></div>`;
-    let h = `<h2 class="saludo">${ICONO_TURNO[t.tipo] || ''} Turno ${esc(t.tipo_nombre)}</h2><p class="sub">${hechas(t.tareas)} de ${t.tareas.length} listas · toca el círculo al terminar cada tarea</p>`;
+    const nH = hechas(t.tareas), nT = t.tareas.length;
+    let h = `<h2 class="saludo">${ICONO_TURNO[t.tipo] || ''} Turno ${esc(t.tipo_nombre)}</h2>
+      <div class="avance" role="img" aria-label="${nH} de ${nT} tareas listas"><b>${nH}<small>/${nT}</small></b><div class="avance-barra"><i style="width:${nT ? Math.round((nH / nT) * 100) : 0}%"></i></div></div>
+      <p class="sub">${nH} de ${nT} listas · toca el círculo al terminar cada tarea</p>`;
     h += cubriendo(t) + tarjetaMiCobertura();
     if (est.relevo && !est.relevo.leida) h += `<p class="nota-aviso">📝 Tienes una nota de relevo sin leer. <button type="button" class="enlace" data-ir-inicio>Leerla</button></p>`;
     const inc = t.tareas.filter((x) => x.incidencia_id);

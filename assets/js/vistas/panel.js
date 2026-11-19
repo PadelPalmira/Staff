@@ -8,13 +8,14 @@ import { montarTareasAdmin } from './tareas_admin.js';
 import { montarInventario } from './inventario.js';
 import { montarPendientes, contarPendientesGestion } from './pendientes.js';
 import { montarMas } from './mas.js';
+import { ICONO } from '../iconos.js';
 
 const LLAVE_TAB = 'ppstaff-tab';
 
 export function montarPanel(raiz, ctx, yo) {
   const esAdmin = yo.rol === 'admin';
   const p = (x) => puede(yo, x);
-  const tabs = [['inicio', 'Inicio', '⌂'], ['turnos', 'Turnos', '◷'], ['tareas', 'Tareas', '✓'], ['pendientes', 'Pendientes', '📌'], ['inventario', 'Inventario', '▤'], ['mas', 'Más', '☰']]
+  const tabs = [['inicio', 'Inicio', ICONO.inicio], ['turnos', 'Turnos', ICONO.turnos], ['tareas', 'Tareas', ICONO.tareas], ['pendientes', 'Pendientes', ICONO.pendientes], ['inventario', 'Inventario', ICONO.inventario], ['mas', 'Más', ICONO.mas]]
     .filter(([id]) => (id === 'inventario' ? p('pedidos') || p('conteos') || p('catalogo') : ['turnos', 'tareas', 'pendientes'].includes(id) ? p(id) : true));
   let actual = api.leerLocal(LLAVE_TAB);
   if (actual === 'usuarios' || actual === 'ajustes') { api.guardarLocal('ppstaff-mas-vista', actual); actual = 'mas'; }
@@ -119,9 +120,9 @@ export function montarPanel(raiz, ctx, yo) {
 
   async function montarInicio(el) {
     el.innerHTML = `<h2 class="saludo">Hola, ${esc(primerNombre(yo.nombre_completo))}</h2>
-      ${p('tablero') ? `<button type="button" class="tarjeta boton-tablero" data-ir-tablero><span aria-hidden="true">📊</span><div><b>${esAdmin ? 'Tablero del dueño' : 'Tablero del club'}</b><span class="sub">Ventas, cumplimiento, descuadres y resumen del día, semana o mes</span></div><i aria-hidden="true">›</i></button>` : ''}
-      ${p('caja') ? '<button type="button" class="tarjeta boton-tablero boton-caja" data-ir-cajas><span aria-hidden="true">💵</span><div><b>Descuadres de caja</b><span class="sub">Revisar, perdonar, confirmar o cobrar cada descuadre</span></div><i aria-hidden="true">›</i></button>' : ''}
-      ${p('caja') || p('conteos') ? '<button type="button" class="tarjeta boton-tablero boton-cobros" data-ir-cobros><span aria-hidden="true">💸</span><div><b>Cobros a empleados</b><span class="sub">Quién debe, quién ya pagó y comprobantes</span></div><i aria-hidden="true">›</i></button>' : ''}
+      ${p('tablero') ? `<button type="button" class="tarjeta boton-tablero" data-ir-tablero><span aria-hidden="true">${ICONO.tablero}</span><div><b>${esAdmin ? 'Tablero del dueño' : 'Tablero del club'}</b><span class="sub">Ventas, cumplimiento, descuadres y resumen del día, semana o mes</span></div><i aria-hidden="true">›</i></button>` : ''}
+      ${p('caja') ? '<button type="button" class="tarjeta boton-tablero boton-caja" data-ir-cajas><span aria-hidden="true">' + ICONO.caja + '</span><div><b>Descuadres de caja</b><span class="sub">Revisar, perdonar, confirmar o cobrar cada descuadre</span></div><i aria-hidden="true">›</i></button>' : ''}
+      ${p('caja') || p('conteos') ? '<button type="button" class="tarjeta boton-tablero boton-cobros" data-ir-cobros><span aria-hidden="true">' + ICONO.cobros + '</span><div><b>Cobros a empleados</b><span class="sub">Quién debe, quién ya pagó y comprobantes</span></div><i aria-hidden="true">›</i></button>' : ''}
       <section class="tarjeta" id="por-hacer"><h2>✅ Por hacer</h2><div class="por-hacer"><p class="cargando">Revisando…</p></div></section>
       ${esAdmin ? '<section class="tarjeta tarjeta-solicitud" id="tarjeta-solicitudes" hidden></section>' : ''}
       <section class="tarjeta tarjeta-avisos" id="tarjeta-avisos" hidden></section>

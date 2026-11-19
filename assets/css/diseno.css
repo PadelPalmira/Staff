@@ -1,0 +1,139 @@
+/* PP Staff 1.2 — capa de diseño.
+   Noche de cancha: fondo azul noche (no negro plano), superficies con un poco de luz arriba, cian del club para acciones
+   y rosa solo para resaltar (lo mejor, la marca). Números en Big Shoulders, como marcador; texto en Instrument Sans. */
+@font-face{font-family:'Instrument Sans';src:url(../fonts/InstrumentSans-Regular.woff) format('woff');font-weight:400;font-display:swap}
+@font-face{font-family:'Instrument Sans';src:url(../fonts/InstrumentSans-Bold.woff) format('woff');font-weight:600 800;font-display:swap}
+@font-face{font-family:'Big Shoulders';src:url(../fonts/BigShoulders-Bold.woff) format('woff');font-weight:700 800;font-display:swap}
+
+:root{
+  --cyan:#1fe0d8; --pink:#ff3db5;
+  --bg:#0a101c; --surface:#111a29; --surface-2:#172235; --surface-3:#1f2c43;
+  --border:rgba(150,180,235,.09); --border-strong:rgba(150,180,235,.17);
+  --text:#edf2fa; --text-2:#9eabc1; --text-3:#6a778d;
+  --ok:#3ddc97; --ok-dim:rgba(61,220,151,.13);
+  --warn:#f7c04a; --warn-dim:rgba(247,192,74,.13);
+  --bad:#ff6b81; --bad-dim:rgba(255,107,129,.13);
+  --font:'Instrument Sans',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --num:'Big Shoulders','Instrument Sans',sans-serif;
+  --tinta:#03211f;
+  --luz:linear-gradient(180deg,rgba(255,255,255,.028),rgba(255,255,255,0) 46%);
+  --sombra:0 1px 0 rgba(255,255,255,.04) inset,0 10px 30px -18px rgba(0,0,0,.8);
+  --resorte:cubic-bezier(.16,1,.3,1);
+}
+html{background:var(--bg)}
+body{background:radial-gradient(120% 60% at 50% -10%,#13203a 0,rgba(19,32,58,0) 60%),var(--bg);background-attachment:fixed;
+  font-feature-settings:"ss01","cv11";letter-spacing:.005em;-webkit-font-smoothing:antialiased}
+h1,h2,h3{letter-spacing:-.012em}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;border-radius:8px}
+
+/* ----- barra de arriba y pestañas: vidrio oscuro ----- */
+.barra{background:rgba(10,16,28,.78);-webkit-backdrop-filter:saturate(1.4) blur(16px);backdrop-filter:saturate(1.4) blur(16px);
+  border-bottom:0;box-shadow:0 1px 0 var(--border)}
+.barra::after{content:"";position:absolute;left:0;right:0;bottom:-1px;height:1px;background:linear-gradient(90deg,transparent,var(--cyan) 30%,var(--pink) 70%,transparent);opacity:.55}
+.barra-izq b{font-weight:700;letter-spacing:-.01em}
+.tabs{background:rgba(10,16,28,.84);-webkit-backdrop-filter:saturate(1.4) blur(18px);backdrop-filter:saturate(1.4) blur(18px);
+  border-top:1px solid var(--border);gap:2px}
+.tabs button{color:var(--text-3);font-weight:600;font-size:11.5px;border-radius:14px;transition:color .2s,background .2s;gap:4px}
+.tabs button svg{transition:transform .35s var(--resorte)}
+.tabs button[aria-current="true"]{color:var(--cyan);background:transparent}
+.tabs button[aria-current="true"] svg{transform:translateY(-1px) scale(1.08)}
+.tabs button[aria-current="true"]::before{content:"";position:absolute;top:3px;left:50%;width:18px;height:3px;margin-left:-9px;border-radius:3px;background:var(--cyan);
+  box-shadow:0 0 12px var(--cyan);animation:marca .35s var(--resorte)}
+@keyframes marca{from{transform:scaleX(0)}}
+.tabs button span{display:grid;place-items:center;height:24px}
+
+/* ----- tarjetas y filas ----- */
+.tarjeta{background:var(--luz),var(--surface);border-color:var(--border);box-shadow:var(--sombra);border-radius:20px}
+.tarjeta h2{font-weight:700}
+.fila{background:var(--luz),var(--surface);border-color:var(--border);border-radius:14px;transition:border-color .2s,background-color .2s}
+button.fila:active{background-color:var(--surface-2)}
+.sub-titulo{text-transform:none;letter-spacing:-.005em;font-size:15px;font-weight:700;color:var(--text);margin:24px 2px 10px}
+.insignia{font-weight:700;letter-spacing:.01em}
+
+/* ----- botones: acción principal en cian sólido ----- */
+.btn{background:var(--cyan);color:var(--tinta);font-weight:700;letter-spacing:.005em;
+  box-shadow:0 1px 0 rgba(255,255,255,.35) inset,0 10px 24px -14px rgba(31,224,216,.9);transition:transform .15s,filter .15s,box-shadow .2s}
+.btn:active{transform:scale(.985);filter:brightness(.95)}
+.btn.ghost{background:var(--surface-2);color:var(--text);border:1px solid var(--border-strong);box-shadow:none}
+.btn.peligro{box-shadow:none}
+.btn.peligro-suave{box-shadow:none}
+.btn-mas{background:var(--cyan);color:var(--tinta);box-shadow:0 10px 24px -10px rgba(31,224,216,.9)}
+.enlace{font-weight:700}
+input[type=text],input[type=email],input[type=password],input[type=tel],select,textarea,
+input[type=number],input[type=time],input[type=date]{background-color:var(--surface-2);border-color:var(--border-strong);transition:border-color .15s,box-shadow .15s}
+input:focus,select:focus,textarea:focus{box-shadow:0 0 0 4px rgba(31,224,216,.14)}
+.segmentos{background:var(--surface);border-color:var(--border)}
+.segmentos button{transition:background .2s,color .2s}
+.segmentos button[aria-selected="true"]{background:var(--surface-3);color:var(--text);box-shadow:0 1px 0 rgba(255,255,255,.06) inset}
+
+/* ----- Inicio: accesos con ícono en baldosa, sin degradados ----- */
+.boton-tablero,.boton-tablero.boton-caja,.boton-tablero.boton-cobros,.boton-tablero.boton-resumen{background:var(--luz),var(--surface);border-color:var(--border);gap:14px;
+  transition:border-color .2s,transform .15s}
+.boton-tablero:active{transform:scale(.99)}
+.boton-tablero>span{width:46px;height:46px;border-radius:14px;display:grid;place-items:center;flex:none;font-size:22px;
+  color:var(--cyan);background:rgba(31,224,216,.1);box-shadow:0 0 0 1px rgba(31,224,216,.18) inset}
+.boton-tablero.boton-caja>span{color:var(--warn);background:var(--warn-dim);box-shadow:0 0 0 1px rgba(247,192,74,.2) inset}
+.boton-tablero.boton-cobros>span{color:var(--pink);background:rgba(255,61,181,.1);box-shadow:0 0 0 1px rgba(255,61,181,.2) inset}
+.boton-tablero b{font-size:16px;font-weight:700}
+.boton-tablero>i{font-size:22px;color:var(--text-3)}
+
+/* ----- números de marcador ----- */
+.kpi-grande b,.cifras b,.rm-barra b,.tab-nav-txt b{font-family:var(--num);font-variant-numeric:tabular-nums;font-weight:700}
+.kpi-grande span{font-size:13px;color:var(--text-2)}
+.kpi-grande b{font-size:58px;line-height:1;letter-spacing:.005em;margin:6px 0 4px}
+.cifras div{background:var(--surface-2);border-radius:14px;padding:12px 6px 10px;box-shadow:0 1px 0 rgba(255,255,255,.04) inset}
+.cifras b{font-size:32px;line-height:1.05;letter-spacing:.01em}
+.cifras.tres b{font-size:28px}
+.cifras span{color:var(--text-2)}
+.tab-nav-txt b{font-size:24px;letter-spacing:.01em}
+
+/* ----- gráficas ----- */
+.graf-ventas{height:170px;padding-top:22px;position:relative;
+  background:repeating-linear-gradient(to top,transparent 0,transparent calc(25% - 1px),rgba(150,180,235,.07) calc(25% - 1px),rgba(150,180,235,.07) 25%) 0 22px/100% calc(100% - 40px) no-repeat}
+.gv-dia span{background:linear-gradient(180deg,rgba(31,224,216,.95),rgba(31,224,216,.35));opacity:1;border-radius:7px 7px 3px 3px}
+.gv-dia.mejor span{background:linear-gradient(180deg,var(--pink),rgba(255,61,181,.4));box-shadow:0 0 16px rgba(255,61,181,.4)}
+.gv-dia em{font-family:var(--num);font-size:13px;font-weight:700;color:var(--text-2);letter-spacing:.02em}
+.gv-dia.mejor em{color:var(--pink)}
+.gv-dia i{font-size:11.5px;font-weight:600}
+.lista-top li i{background:linear-gradient(90deg,var(--cyan),rgba(31,224,216,.25));height:6px}
+.lista-top li:first-child i{background:linear-gradient(90deg,var(--pink),rgba(255,61,181,.3))}
+.barra-dia span,.rm-barra i{background:linear-gradient(90deg,var(--cyan),rgba(31,224,216,.35))}
+
+/* ----- ventanas (hojas que suben) y avisos ----- */
+.ventana-fondo{background:rgba(3,7,14,.62);-webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px)}
+.ventana{background:var(--surface);border:1px solid var(--border-strong);border-bottom:0;box-shadow:0 -20px 60px -20px rgba(0,0,0,.8);
+  animation:hoja .48s var(--resorte)}
+.ventana::before{content:"";display:block;width:38px;height:4px;border-radius:4px;background:var(--border-strong);margin:8px auto 0}
+.ventana-cab h3{font-weight:700}
+@keyframes hoja{from{transform:translateY(100%)}}
+.aviso{background:var(--surface-3);border-radius:16px;box-shadow:0 18px 40px -16px rgba(0,0,0,.8);animation:baja2 .45s var(--resorte)}
+@keyframes baja2{from{opacity:0;transform:translateY(-16px) scale(.98)}}
+
+/* ----- tareas: el círculo responde al tocarlo ----- */
+.tarea{background:var(--luz),var(--surface);border-color:var(--border);border-radius:16px}
+.tarea-check{transition:transform .25s var(--resorte),background .2s,border-color .2s}
+.tarea-check:active{transform:scale(.88)}
+.tarea.lista .tarea-check{box-shadow:0 0 0 4px rgba(61,220,151,.08)}
+
+/* ----- un solo momento orquestado: el tablero entra ----- */
+.anima .graf-ventas .gv-dia span{transform-origin:bottom;animation:crece .9s var(--resorte) both;animation-delay:calc(var(--i,0) * 45ms + 120ms)}
+.anima .graf-ventas .gv-dia em{animation:aparece2 .5s ease both;animation-delay:calc(var(--i,0) * 45ms + 500ms)}
+.anima .lista-top li i{transform-origin:left;animation:crece-x 1s var(--resorte) both .3s}
+@keyframes crece{from{transform:scaleY(0)}}
+@keyframes crece-x{from{transform:scaleX(0)}}
+@keyframes aparece2{from{opacity:0;transform:translateY(4px)}}
+
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:.001ms !important;animation-delay:0s !important;transition-duration:.001ms !important}
+}
+
+/* ----- avance del turno (empleado) ----- */
+.avance{display:flex;align-items:center;gap:14px;margin:10px 0 2px}
+.avance b{font-family:var(--num);font-size:40px;line-height:1;font-variant-numeric:tabular-nums;color:var(--text)}
+.avance b small{font-size:22px;color:var(--text-3);margin-left:2px}
+.avance-barra{flex:1;height:10px;border-radius:10px;background:var(--surface-2);box-shadow:0 0 0 1px var(--border) inset;overflow:hidden}
+.avance-barra i{display:block;height:100%;border-radius:10px;background:linear-gradient(90deg,var(--cyan),#7cf0ea);box-shadow:0 0 14px rgba(31,224,216,.55);
+  transition:width .6s var(--resorte)}
+.seg-ico{display:block;height:20px;margin:0 auto 2px}
+.seg-ico svg{width:19px;height:19px}
+input[type=radio],input[type=checkbox]{accent-color:var(--cyan)}

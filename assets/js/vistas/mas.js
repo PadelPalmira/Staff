@@ -7,13 +7,15 @@ import { montarAjustes } from './ajustes.js';
 import { montarTablero } from './tablero.js';
 import { formPrefsAvisos } from './revisiones.js';
 import { estadoPush, activarPush, desactivarPush, probarPush, esIOS } from '../push.js';
+import { ICONO } from '../iconos.js';
 
 const LLAVE = 'ppstaff-mas-vista';
 
 export function montarMas(el, ctx, yo, { vista: inicial } = {}) {
   const esAdmin = yo.rol === 'admin';
-  const vistas = esAdmin ? [['tablero', '📊<br>Tablero'], ['usuarios', '☺<br>Usuarios'], ['ajustes', '⚙<br>Ajustes'], ['actividad', '📈<br>Actividad'], ['cuenta', '👤<br>Mi cuenta']]
-    : puede(yo, 'tablero') ? [['cuenta', '👤<br>Mi cuenta'], ['tablero', '📊<br>Tablero']] : [['cuenta', '👤 Mi cuenta']];
+  const I = (k, t) => `<span class="seg-ico">${ICONO[k]}</span>${t}`;
+  const vistas = esAdmin ? [['tablero', I('tablero', 'Tablero')], ['usuarios', I('usuarios', 'Usuarios')], ['ajustes', I('ajustes', 'Ajustes')], ['actividad', I('actividad', 'Actividad')], ['cuenta', I('cuenta', 'Mi cuenta')]]
+    : puede(yo, 'tablero') ? [['cuenta', I('cuenta', 'Mi cuenta')], ['tablero', I('tablero', 'Tablero')]] : [['cuenta', 'Mi cuenta']];
   let vista = inicial || api.leerLocal(LLAVE) || vistas[0][0];
   if (!vistas.some((v) => v[0] === vista)) vista = vistas[0][0];
   el.innerHTML = `${vistas.length > 1 ? `<div class="segmentos cuatro" role="tablist" style="--n:${vistas.length}">${vistas.map(([k, n]) => `<button type="button" data-vista="${k}">${n}${k === 'usuarios' ? '<i class="punto-aviso" data-badge-sol hidden></i>' : ''}</button>`).join('')}</div>` : ''}

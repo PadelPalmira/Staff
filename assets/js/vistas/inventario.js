@@ -64,13 +64,27 @@ function segPedidosYCarga(el, yo) {
 // Por pedir: artículos en o debajo de "Existencias bajas" de Loyverse (último export + pedidos recibidos después)
 async function segBajas(el) {
   const r = await rpc('inv_bajas');
-  if (!r.ok || !r.items?.length) { el.hidden = true; return; }
+  const items = r.ok ? r.items || [] : [], fuera = r.ok ? r.no_pedir || [] : [];
+  if (!items.length && !fuera.length) { el.hidden = true; return; }
   el.hidden = false;
-  el.innerHTML = `<div class="enc-avisos"><h2>📉 Por pedir (${r.items.length})</h2><span class="sub">Loyverse ${esc(haceTxt(r.subido_en))}</span></div>
-    <p class="ayuda">Según “Existencias bajas” de cada artículo en Loyverse. Se actualiza solo.</p>
-    <div class="lista">${r.items.map((a) => { const e = estiloCategoria(a.categoria); const q = Number(a.stock || 0) + Number(a.recibido || 0);
+  el.innerHTML = `<div class="enc-avisos"><h2>📉 Por pedir (${items.length})</h2><span class="sub">Loyverse ${esc(haceTxt(r.subido_en))}</span></div>
+    <p class="ayuda">Según “Existencias bajas” de cada artículo en Loyverse. Se actualiza solo. Si algo ya no se va a pedir, toca “Ya no se pide” y deja de salir aquí y en el correo.</p>
+    ${items.length ? `<div class="lista">${items.map((a) => { const e = estiloCategoria(a.categoria); const q = Number(a.stock || 0) + Number(a.recibido || 0);
       return `<div class="fila inv" style="--cat:${e.color}"><div class="fila-txt"><b>${e.emoji} ${esc(a.nombre)}</b>
-        <span>Quedan <b class="${q <= 0 ? 'mal-txt' : 'warn-txt'}">${esc(cantidad(q))}</b> ${esc(unidadTxt(a, q))} · mínimo ${esc(cantidad(a.minimo))}${Number(a.recibido) ? ` · incluye ${esc(cantidad(a.recibido))} recibidas que aún no se suben` : ''}</span></div></div>`; }).join('')}</div>`;
+        <span>Quedan <b class="${q <= 0 ? 'mal-txt' : 'warn-txt'}">${esc(cantidad(q))}</b> ${esc(unidadTxt(a, q))} · mínimo ${esc(cantidad(a.minimo))}${Number(a.recibido) ? ` · incluye ${esc(cantidad(a.recibido))} recibidas que aún no se suben` : ''}</span></div>
+        <button type="button" class="btn ghost chico" data-no-pedir="${esc(a.id)}">Ya no se pide</button></div>`; }).join('')}</div>` : '<p class="todo-bien">✓ No falta pedir nada.</p>'}
+    ${fuera.length ? `<details class="no-pedir"><summary>Ya no se piden (${fuera.length})</summary><div class="lista">${fuera.map((a) => `<div class="fila inv"><div class="fila-txt"><b>${esc(a.nombre)}</b>
+        <span>Quedan ${esc(cantidad(Number(a.stock || 0)))} ${esc(unidadTxt(a, Number(a.stock || 0)))}</span></div><button type="button" class="btn ghost chico" data-si-pedir="${esc(a.id)}">Volver a pedir</button></div>`).join('')}</div></details>` : ''}`;
+  el.onclick = (e) => {
+    const b = e.target.closest('[data-no-pedir], [data-si-pedir]'); if (!b) return;
+    const no = b.matches('[data-no-pedir]');
+    conOcupado(b, async () => {
+      const x = await rpc('inv_no_pedir', { p_articulo: no ? b.dataset.noPedir : b.dataset.siPedir, p_no_pedir: no });
+      if (!x.ok) return aviso(msg(x), 'error');
+      aviso(no ? 'Listo: ya no saldrá en “Por pedir” ni en el correo.' : 'Listo: vuelve a avisar cuando esté bajo.', 'ok');
+      segBajas(el);
+    });
+  };
 }
 
 async function segPedidos(el, recargar) {
